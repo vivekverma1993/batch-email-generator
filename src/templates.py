@@ -1,13 +1,12 @@
 """
-Email Template Repository
+Email template management system for the Batch Email Generator.
 
-This module contains all email templates and related functionality for the 
-Batch Email Generator.
+This module provides a collection of professional email templates for different
+use cases like sales outreach, recruitment, networking, etc.
 """
 
 from enum import Enum
-from typing import Optional
-from fastapi import HTTPException
+from typing import Dict, Any, Optional
 
 
 class TemplateType(str, Enum):
@@ -21,9 +20,16 @@ class TemplateType(str, Enum):
     COLD_EMAIL = "cold_email"
 
 
-# Template Repository 
-TEMPLATE_REPOSITORY = {
-    TemplateType.SALES_OUTREACH: """Subject: Quick question about {{company}}'s growth strategy
+# Default template type
+DEFAULT_TEMPLATE_TYPE = TemplateType.SALES_OUTREACH
+
+# Template repository
+EMAIL_TEMPLATES = {
+    TemplateType.SALES_OUTREACH: {
+        "name": "Sales Outreach",
+        "description": "Professional sales outreach template for B2B lead generation",
+        "use_case": "Initial contact with potential clients to offer services/products",
+        "content": """Subject: Quick question about {{company}}'s growth strategy
 
 Hi {{name}},
 
@@ -36,165 +42,202 @@ Would you be open to a 15-minute call this week? I'd love to share some specific
 You can view my background here: {{linkedin_url}}
 
 Best regards,
-[Your Name]
+Vivek Verma
 
-P.S. If this isn't a priority right now, I completely understand. Feel free to keep my contact for future reference.""",
-
-    TemplateType.RECRUITMENT: """Subject: Exciting opportunity at [Company Name] - Your {{company}} experience caught our attention
-
-Hi {{name}},
-
-I came across your profile and was impressed by your work at {{company}}. Your background aligns perfectly with a role we're looking to fill.
-
-We're seeking talented professionals with your expertise to join our growing team. Based on your experience at {{company}}, I believe you'd be a great fit for this position.
-
-Would you be interested in a brief 15-minute call to discuss this opportunity? I'd love to share more details about the role and how your skills from {{company}} would contribute to our team's success.
-
-You can learn more about my background here: {{linkedin_url}}
-
-Best regards,
-[Your Name]
-[Company] Talent Acquisition
-
-Looking forward to connecting with you!""",
-
-    TemplateType.NETWORKING: """Subject: Fellow {{company}} industry professional - Would love to connect
+P.S. If this isn't a priority right now, I completely understand. Feel free to keep my contact for future reference."""
+    },
+    
+    TemplateType.RECRUITMENT: {
+        "name": "Recruitment Outreach",
+        "description": "Professional template for reaching out to potential candidates",
+        "use_case": "Recruiting talented professionals for open positions",
+        "content": """Subject: Exciting opportunity at {{company}} - Would love to connect
 
 Hi {{name}},
 
-I noticed your impressive work at {{company}} and would love to connect with a fellow professional in our industry.
+I came across your profile and was impressed by your background, particularly your experience at {{company}}. Your skill set aligns perfectly with some exciting opportunities we have.
 
-Your experience at {{company}} particularly caught my attention, and I believe we could have some interesting conversations about industry trends and best practices.
+We're currently looking for talented professionals to join our growing team, and I believe you'd be a great fit for several roles we have open. I'd love to discuss how your experience could contribute to our mission.
 
-Would you be open to a brief virtual coffee chat? I'm always eager to learn from professionals with your background and share insights from my own experience.
+Would you be interested in a brief conversation about potential opportunities? I can share more details about the roles and how they might align with your career goals.
 
-Feel free to check out my profile: {{linkedin_url}}
+Feel free to check out more about our company culture: {{linkedin_url}}
 
 Best regards,
-[Your Name]
+Vivek Verma
+Talent Acquisition Team
 
-Looking forward to connecting!""",
-
-    TemplateType.PARTNERSHIP: """Subject: Potential partnership opportunity between {{company}} and [Your Company]
+P.S. Even if you're not actively looking, I'd be happy to keep you in mind for future opportunities."""
+    },
+    
+    TemplateType.NETWORKING: {
+        "name": "Professional Networking",
+        "description": "Template for building professional relationships and connections",
+        "use_case": "Connecting with industry professionals for mutual benefit",
+        "content": """Subject: Connecting with a fellow professional from {{company}}
 
 Hi {{name}},
 
-I've been following {{company}}'s work and am impressed by your team's achievements. I believe there could be some exciting partnership opportunities between {{company}} and our organization.
+I hope this message finds you well. I came across your profile and was impressed by your work at {{company}}, particularly in your current role.
 
-Given your role at {{company}}, I thought you'd be the right person to explore potential collaboration opportunities that could benefit both our organizations.
+I'm always interested in connecting with talented professionals in our industry. Your experience and insights would be valuable, and I believe there could be opportunities for mutual collaboration or knowledge sharing.
 
-Would you be interested in a brief discussion about how we might work together? I'd love to share some ideas and hear your thoughts on potential synergies.
+Would you be open to connecting? I'd love to learn more about your work and share some insights from my own experience.
 
-You can learn more about my background here: {{linkedin_url}}
+Looking forward to potentially connecting: {{linkedin_url}}
 
 Best regards,
-[Your Name]
-[Your Company]
+Vivek Verma
 
-Excited about the possibilities!""",
-
-    TemplateType.FOLLOW_UP: """Subject: Following up on our connection - {{company}} insights
+P.S. No agenda here - just genuinely interested in expanding my professional network with quality connections."""
+    },
+    
+    TemplateType.PARTNERSHIP: {
+        "name": "Partnership Proposal",
+        "description": "Template for proposing business partnerships and collaborations",
+        "use_case": "Reaching out to potential business partners or collaborators",
+        "content": """Subject: Partnership opportunity between our companies
 
 Hi {{name}},
 
-I hope this message finds you well. I wanted to follow up on our previous conversation and see how things are progressing at {{company}}.
+I've been researching companies in our space and {{company}} consistently comes up as an industry leader. Your approach to [specific area] particularly caught my attention.
 
-Your insights about {{company}}'s approach were really valuable, and I've been thinking about some of the points you raised. I'd love to continue our discussion when you have a moment.
+I believe there might be some interesting synergies between our organizations. We've been exploring strategic partnerships that could benefit both parties, and I think {{company}} could be an ideal fit.
 
-Would you be available for a brief call this week? I have some updates to share and would appreciate your perspective on a few industry developments.
+I'd love to explore potential collaboration opportunities. Would you be interested in a brief conversation to discuss how our companies might work together?
 
-As always, you can find more about my work here: {{linkedin_url}}
+You can learn more about our approach here: {{linkedin_url}}
 
 Best regards,
-[Your Name]
+Vivek Verma
+Business Development
 
-Looking forward to reconnecting!""",
-
-    TemplateType.INTRODUCTION: """Subject: Introduction and admiration for {{company}}'s work
+P.S. I'm happy to share some specific ideas I have in mind during our conversation."""
+    },
+    
+    TemplateType.FOLLOW_UP: {
+        "name": "Follow-up Email",
+        "description": "Template for following up on previous conversations or meetings",
+        "use_case": "Following up after initial contact, meetings, or events",
+        "content": """Subject: Following up on our conversation about {{company}}
 
 Hi {{name}},
 
-I wanted to reach out and introduce myself. I've been following {{company}}'s journey and am truly impressed by the work your team is doing.
+I wanted to follow up on our previous conversation about {{company}} and the opportunities we discussed.
 
-Your role at {{company}} and the company's recent achievements have caught my attention, and I'd love the opportunity to connect with someone driving such innovative work.
+I've been thinking about the points you raised, and I believe we can address the specific challenges you mentioned. I'd like to share some additional insights that might be relevant to your situation.
 
-I'd appreciate the chance for a brief introduction call to learn more about your experience at {{company}} and share a bit about my own background in the industry.
+Would you have time for a brief follow-up call this week? I can provide more concrete examples of how we've helped companies similar to {{company}}.
 
-You can learn more about my work here: {{linkedin_url}}
+As promised, here's my LinkedIn profile for reference: {{linkedin_url}}
 
 Best regards,
-[Your Name]
+Vivek Verma
 
-Hope to connect soon!""",
-
-    TemplateType.COLD_EMAIL: """Subject: {{name}}, impressed by your work at {{company}}
+P.S. Thank you for your time during our last conversation - I found your insights very valuable."""
+    },
+    
+    TemplateType.INTRODUCTION: {
+        "name": "Introduction Email",
+        "description": "Template for introducing yourself and your services",
+        "use_case": "Initial introduction to new contacts or warm leads",
+        "content": """Subject: Introduction - Helping {{company}} achieve its goals
 
 Hi {{name}},
 
-I hope this email finds you well. I came across your profile and was impressed by your work at {{company}}.
+I hope this email finds you well. My name is Vivek Verma, and I wanted to introduce myself and my work.
 
-I'm reaching out because I believe we might have some mutual interests in [relevant area], and your experience at {{company}} would bring valuable perspective to a conversation.
+I help companies like {{company}} optimize their operations and achieve sustainable growth. Based on what I've seen about {{company}}'s trajectory, I believe there might be some interesting opportunities to collaborate.
 
-Would you be open to a brief 15-minute call? I'd love to learn more about your work at {{company}} and share some insights from my own experience.
+I'd love to learn more about your current initiatives and see if there's a way I can contribute to {{company}}'s continued success.
 
-You can find my background here: {{linkedin_url}}
+Would you be open to a brief introductory conversation? I promise to keep it concise and valuable.
+
+Feel free to connect with me here: {{linkedin_url}}
 
 Best regards,
-[Your Name]
+Vivek Verma
 
-Thank you for your time!"""
-}
+P.S. I'm genuinely interested in learning about your business, not just pitching services."""
+    },
+    
+    TemplateType.COLD_EMAIL: {
+        "name": "Cold Email Outreach",
+        "description": "Generic cold email template for initial contact",
+        "use_case": "First-time contact with prospects who don't know you",
+        "content": """Subject: Quick question about {{company}}'s [specific area]
 
-# Default template type
-DEFAULT_TEMPLATE_TYPE = TemplateType.SALES_OUTREACH
+Hi {{name}},
 
+I hope you're having a great week. I've been researching companies in your industry and {{company}} stands out for [specific reason].
 
-def get_template_description(template_type: TemplateType) -> str:
-    """Get human-readable description for template types"""
-    descriptions = {
-        TemplateType.SALES_OUTREACH: "Professional sales outreach for business development",
-        TemplateType.RECRUITMENT: "Recruiting talented professionals for job opportunities",
-        TemplateType.NETWORKING: "Building professional relationships and industry connections",
-        TemplateType.PARTNERSHIP: "Exploring business partnership and collaboration opportunities",
-        TemplateType.FOLLOW_UP: "Following up on previous conversations and connections",
-        TemplateType.INTRODUCTION: "Introducing yourself and expressing admiration for their work",
-        TemplateType.COLD_EMAIL: "General cold outreach for various professional purposes"
+I'm reaching out because I help organizations like {{company}} with [specific value proposition]. I've noticed that many companies in your space are dealing with [common challenge], and I'm curious if this is something {{company}} is experiencing as well.
+
+If so, I'd love to share a quick insight that has helped similar companies. Would you be open to a brief 10-minute conversation?
+
+No worries if the timing isn't right - I understand how busy things can get.
+
+Best regards,
+Vivek Verma
+
+P.S. Feel free to check out my background: {{linkedin_url}}"""
     }
-    return descriptions.get(template_type, "Professional email template")
+}
 
 
 def get_template_content(template_type: Optional[TemplateType] = None) -> str:
-    """Get template content by type, with fallback to default"""
+    """Get the content of a specific template type"""
     if template_type is None:
         template_type = DEFAULT_TEMPLATE_TYPE
     
-    if template_type not in TEMPLATE_REPOSITORY:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid template type: {template_type}. Available types: {[t.value for t in TemplateType]}"
-        )
+    if template_type not in EMAIL_TEMPLATES:
+        raise ValueError(f"Template type '{template_type}' not found. Available types: {list(EMAIL_TEMPLATES.keys())}")
     
-    return TEMPLATE_REPOSITORY[template_type]
+    return EMAIL_TEMPLATES[template_type]["content"]
 
 
-def get_all_templates():
-    """Get all available templates with metadata"""
-    return [
-        {
-            "name": template_type.value,
-            "description": get_template_description(template_type),
-            "preview": TEMPLATE_REPOSITORY[template_type][:100] + "..."
-        }
-        for template_type in TemplateType
-    ]
-
-
-def get_template_info(template_type: Optional[TemplateType] = None):
-    """Get template information for API responses"""
+def get_template_info(template_type: Optional[TemplateType] = None) -> Dict[str, Any]:
+    """Get information about a specific template"""
     if template_type is None:
         template_type = DEFAULT_TEMPLATE_TYPE
     
+    if template_type not in EMAIL_TEMPLATES:
+        raise ValueError(f"Template type '{template_type}' not found. Available types: {list(EMAIL_TEMPLATES.keys())}")
+    
+    template_data = EMAIL_TEMPLATES[template_type].copy()
     return {
         "template_type": template_type.value,
-        "template_description": get_template_description(template_type)
+        "name": template_data["name"],
+        "description": template_data["description"],
+        "use_case": template_data["use_case"],
+        "variables": ["name", "company", "linkedin_url"],
+        "content_preview": template_data["content"][:200] + "..." if len(template_data["content"]) > 200 else template_data["content"]
+    }
+
+
+def get_all_templates() -> Dict[str, Dict[str, Any]]:
+    """Get information about all available templates"""
+    return {
+        template_type.value: {
+            "name": template_data["name"],
+            "description": template_data["description"],
+            "use_case": template_data["use_case"]
+        }
+        for template_type, template_data in EMAIL_TEMPLATES.items()
+    }
+
+
+def validate_template_variables(template_content: str) -> bool:
+    """Validate that a template contains the required variables"""
+    required_vars = ["{{name}}", "{{company}}", "{{linkedin_url}}"]
+    return all(var in template_content for var in required_vars)
+
+
+def get_template_statistics() -> Dict[str, Any]:
+    """Get statistics about the template repository"""
+    return {
+        "total_templates": len(EMAIL_TEMPLATES),
+        "available_types": [t.value for t in TemplateType],
+        "default_template": DEFAULT_TEMPLATE_TYPE.value,
+        "required_variables": ["name", "company", "linkedin_url"]
     }

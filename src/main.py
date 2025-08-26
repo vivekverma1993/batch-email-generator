@@ -23,16 +23,27 @@ MAX_CSV_ROWS = int(os.getenv("MAX_CSV_ROWS", "50000"))  # Maximum CSV rows to pr
 
 app = FastAPI(
     title="Batch Email Generator",
-    description="Generate personalized outreach emails from CSV data",
-    version="1.0.0"
+    description="Generate personalized outreach emails from CSV data using configurable templates and async batch processing",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
-
 
 
 @app.get("/")
 async def root():
     """Root endpoint with basic information"""
-    return {"message": "Welcome to Batch Email Generator API"}
+    return {
+        "message": "Welcome to Batch Email Generator API",
+        "version": "1.0.0",
+        "endpoints": {
+            "health": "/health",
+            "docs": "/docs",
+            "templates": "/templates",
+            "generate_emails": "/generate-emails",
+            "test_metadata": "/process-emails-metadata"
+        }
+    }
 
 @app.get("/health")
 async def health_check():
@@ -40,6 +51,7 @@ async def health_check():
     return {
         "status": "healthy", 
         "message": "Batch Email Generator is running",
+        "version": "1.0.0",
         "config": {
             "batch_size": BATCH_SIZE,
             "max_batch_size": MAX_BATCH_SIZE,
@@ -52,10 +64,9 @@ async def get_available_templates():
     """Get list of available email templates"""
     return {
         "available_templates": get_all_templates(),
-        "default_template": DEFAULT_TEMPLATE_TYPE.value
+        "default_template": DEFAULT_TEMPLATE_TYPE.value,
+        "total_templates": len(get_all_templates())
     }
-
-
 
 @app.post("/process-emails-metadata")
 async def process_emails_metadata(
@@ -158,7 +169,12 @@ async def process_emails_metadata(
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="File encoding not supported. Please use UTF-8 encoded CSV")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        # Log the full error for debugging while returning safe message to user
+        print(f"Unexpected error in process_emails_metadata: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Internal server error occurred while processing your request. Please try again or contact support if the issue persists."
+        )
 
 def render_email_template(template_str: str, name: str, company: str, linkedin_url: str) -> str:
     """Render an email template with provided data"""
@@ -258,7 +274,7 @@ async def generate_emails(
                 detail=f"CSV too large. Maximum allowed rows: {MAX_CSV_ROWS}, received: {len(df)}"
             )
         
-        # Create Jinja2 template object
+        # Create template object
         jinja_template = Template(email_template)
         
         # Split DataFrame into batches for efficient processing
@@ -322,4 +338,34 @@ async def generate_emails(
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="File encoding not supported. Please use UTF-8 encoded CSV")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        # Log the full error for debugging while returning safe message to user
+        print(f"Unexpected error in generate_emails: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Internal server error occurred while processing your request. Please try again or contact support if the issue persists."
+        )
+
+
+# Production runner
+if __name__ == "__main__":
+    import uvicorn
+    
+    # Configuration from environment variables
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+    workers = int(os.getenv("WORKERS", "1"))
+    reload = os.getenv("RELOAD", "false").lower() == "true"
+    
+    print(f"Starting Batch Email Generator on {host}:{port}")
+    print(f"Configuration: Batch size={BATCH_SIZE}, Max rows={MAX_CSV_ROWS}")
+    print(f"Workers: {workers}, Reload: {reload}")
+    
+    uvicorn.run(
+        "src.main:app",
+        host=host,
+        port=port,
+        workers=workers if not reload else 1,  # Can't use multiple workers with reload
+        reload=reload,
+        access_log=True,
+        log_level="info"
+    )
