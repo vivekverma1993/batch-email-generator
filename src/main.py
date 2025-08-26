@@ -1,5 +1,4 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
-from jinja2 import Template
 from typing import Optional
 import pandas as pd
 import io
@@ -15,20 +14,43 @@ load_dotenv()
 from .templates import (
     TemplateType, 
     DEFAULT_TEMPLATE_TYPE, 
-    get_template_content, 
     get_all_templates,
     get_template_info
+)
+
+# Import modular components
+from .csv_processor import (
+    validate_and_enhance_csv,
+    get_csv_info,
+    split_dataframe_by_intelligence,
+    validate_csv_size,
+    validate_csv_not_empty
+)
+from .email_generator import (
+    generate_single_email,
+    process_template_dataframe
+)
+from .background_processor import (
+    process_ai_emails_background,
+    create_ai_placeholders
+)
+from .utils import (
+    merge_results_in_order,
+    generate_request_id,
+    calculate_file_size_mb
 )
 
 # Configuration settings
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "100"))  # Default: 100, configurable via environment
 MAX_BATCH_SIZE = int(os.getenv("MAX_BATCH_SIZE", "1000"))  # Maximum allowed batch size
 MAX_CSV_ROWS = int(os.getenv("MAX_CSV_ROWS", "50000"))  # Maximum CSV rows to process
+INTELLIGENCE_BATCH_SIZE = int(os.getenv("INTELLIGENCE_BATCH_SIZE", "5"))  # Smaller batches for AI processing
+AI_FALLBACK_TO_TEMPLATE = os.getenv("AI_FALLBACK_TO_TEMPLATE", "true").lower() == "true"
 
 app = FastAPI(
     title="Batch Email Generator",
-    description="Generate personalized outreach emails from CSV data using configurable templates and async batch processing",
-    version="1.0.0",
+    description="Generate personalized outreach emails from CSV data using configurable templates, fake LinkedIn research, and AI-powered generation",
+    version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -39,7 +61,14 @@ async def root():
     """Root endpoint with basic information"""
     return {
         "message": "Welcome to Batch Email Generator API",
-        "version": "1.0.0",
+        "version": "2.0.0",
+        "features": [
+            "Template-based email generation",
+            "Fake LinkedIn research",
+            "AI-powered personalization", 
+            "Industry-aware data generation",
+            "Batch processing with fallback"
+        ],
         "endpoints": {
             "health": "/health",
             "docs": "/docs",
@@ -52,14 +81,29 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint to verify service is running"""
+    # Check AI configuration
+    try:
+        from .ai_generator import validate_ai_configuration
+        ai_valid, ai_error = validate_ai_configuration()
+        ai_status = "configured" if ai_valid else f"not configured: {ai_error}"
+    except Exception as e:
+        ai_status = f"error: {str(e)}"
+    
     return {
         "status": "healthy", 
         "message": "Batch Email Generator is running",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "config": {
             "batch_size": BATCH_SIZE,
             "max_batch_size": MAX_BATCH_SIZE,
-            "max_csv_rows": MAX_CSV_ROWS
+            "max_csv_rows": MAX_CSV_ROWS,
+            "intelligence_batch_size": INTELLIGENCE_BATCH_SIZE,
+            "ai_fallback_enabled": AI_FALLBACK_TO_TEMPLATE
+        },
+        "capabilities": {
+            "templates": "available",
+            "fake_linkedin_research": "available",
+            "ai_generation": ai_status
         }
     }
 
@@ -75,7 +119,7 @@ async def get_available_templates():
 @app.post("/process-emails-metadata")
 async def process_emails_metadata(
     file: UploadFile = File(...),
-    template_type: Optional[TemplateType] = Form(None, description="Email template type. Uses sales_outreach if not provided.")
+    template_type: Optional[TemplateType] = Form(None, description="Fallback template type when CSV template_type column is empty. Uses sales_outreach if not provided.")
 ):
     """
     Process CSV and return metadata only (for testing large files via Swagger UI)
@@ -84,8 +128,16 @@ async def process_emails_metadata(
     only metadata instead of the full processed file. For testing large datasets
     through Swagger UI without download limitations.
     
-    - **file**: CSV file with columns: name, company, linkedin_url
-    - **template_type**: Email template type from available templates. Uses sales_outreach if not provided.
+    - **file**: CSV file with required columns: name, company, linkedin_url
+              Optional columns: intelligence (true/false), template_type (template name)
+    - **template_type**: Fallback email template type when template_type column is empty. Uses sales_outreach if not provided.
+    
+    **CSV Column Details:**
+    - **name** (required): Contact's name
+    - **company** (required): Contact's company name
+    - **linkedin_url** (required): Contact's LinkedIn profile URL
+    - **intelligence** (optional): true/false - Use AI research and generation (not implemented in Phase 1)
+    - **template_type** (optional): Per-row template selection (overrides the fallback template_type parameter)
     
     Available template types: sales_outreach, recruitment, networking, partnership, follow_up, introduction, cold_email
     
@@ -96,9 +148,6 @@ async def process_emails_metadata(
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="File must be a CSV")
     
-    # Get template content from repository
-    email_template = get_template_content(template_type)
-    
     # Read file contents
     contents = await file.read()
     
@@ -106,32 +155,13 @@ async def process_emails_metadata(
         # Parse CSV data
         df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
         
-        # Validate required columns
-        required_columns = ['name', 'company', 'linkedin_url']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Missing required columns: {', '.join(missing_columns)}. Required: {', '.join(required_columns)}"
-            )
+        # Validate CSV content and structure
+        validate_csv_not_empty(df)
+        df = validate_and_enhance_csv(df)
+        validate_csv_size(df, MAX_CSV_ROWS)
         
-        # Check if CSV has data
-        if df.empty:
-            raise HTTPException(status_code=400, detail="CSV file is empty")
-        
-        # Validate CSV size limits
-        if len(df) > MAX_CSV_ROWS:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"CSV too large. Maximum allowed rows: {MAX_CSV_ROWS}, received: {len(df)}"
-            )
-        
-        # Create Jinja2 template object
-        jinja_template = Template(email_template)
-        
-        # Calculate batch information
-        batches = create_batches(df, BATCH_SIZE)
-        total_batches = len(batches)
+        # Calculate processing information for new parallel approach
+        ai_rows, template_rows = split_dataframe_by_intelligence(df)
         
         # Generate sample emails from first few rows
         sample_size = min(3, len(df))
@@ -139,11 +169,13 @@ async def process_emails_metadata(
         
         sample_emails = []
         for _, row in sample_df.iterrows():
-            email = await generate_single_email(row, jinja_template)
+            email = await generate_single_email(row, template_type)
             sample_emails.append({
                 "name": str(row['name']),
                 "company": str(row['company']),
                 "linkedin_url": str(row['linkedin_url']),
+                "intelligence": row.get('intelligence', False),
+                "template_type": row.get('template_type', ''),
                 "generated_email": email[:200] + "..." if len(email) > 200 else email
             })
         
@@ -157,8 +189,10 @@ async def process_emails_metadata(
             },
             "processing_info": {
                 "total_rows": len(df),
-                "batch_size": BATCH_SIZE,
-                "total_batches": total_batches,
+                "ai_rows": len(ai_rows),
+                "template_rows": len(template_rows),
+                "processing_method": "parallel",
+                "ai_batch_size": INTELLIGENCE_BATCH_SIZE,
                 "estimated_output_size_mb": round((len(df) * 1000) / (1024 * 1024), 1)  # Rough estimate
             },
             "template_info": get_template_info(template_type),
@@ -180,79 +214,55 @@ async def process_emails_metadata(
             detail=f"Internal server error occurred while processing your request. Please try again or contact support if the issue persists."
         )
 
-def render_email_template(template_str: str, name: str, company: str, linkedin_url: str) -> str:
-    """Render an email template with provided data"""
-    try:
-        template = Template(template_str)
-        return template.render(
-            name=name,
-            company=company,
-            linkedin_url=linkedin_url
-        ).strip()
-    except Exception as e:
-        return f"Error rendering template: {str(e)}"
 
-async def generate_single_email(row: pd.Series, template: Template) -> str:
-    """Generate a single personalized email using the template"""
-    try:
-        # Convert row to dict for template rendering
-        context = {
-            'name': str(row.get('name', '')),
-            'company': str(row.get('company', '')),
-            'linkedin_url': str(row.get('linkedin_url', ''))
-        }
-        
-        # Render template with context
-        email_content = template.render(**context)
-        return email_content.strip()
-    
-    except Exception as e:
-        return f"Error generating email: {str(e)}"
 
-# TODO: asyncio.gather has some disadvantages like missing error handling and memory usage.
-# TODO: Consider using a different approach for batch processing. like using a asyncio.TaskGroup
-# to manage the tasks and handle errors.
-async def process_batch(batch_df: pd.DataFrame, template: Template) -> list[str]:
-    """Process a batch of rows in parallel"""
-    # Generate emails for all rows in this batch concurrently
-    batch_emails = await asyncio.gather(*[
-        generate_single_email(row, template)
-        for _, row in batch_df.iterrows()
-    ])
-    return batch_emails
 
-def create_batches(df: pd.DataFrame, batch_size: int) -> list[pd.DataFrame]:
-    """Split DataFrame into batches of specified size"""
-    batches = []
-    for i in range(0, len(df), batch_size):
-        batch = df.iloc[i:i + batch_size].copy()
-        batches.append(batch)
-    return batches
+
+
+
+
+
 
 @app.post("/generate-emails")
 async def generate_emails(
     file: UploadFile = File(...),
-    template_type: Optional[TemplateType] = Form(None, description="Email template type. Uses sales_outreach if not provided.")
+    template_type: Optional[TemplateType] = Form(None, description="Fallback template type when CSV template_type column is empty. Uses sales_outreach if not provided.")
 ):
     """
-    Generate personalized emails from CSV data using batch processing
+    Generate personalized emails from CSV data using background processing for optimal UX
     
-    - **file**: CSV file with columns: name, company, linkedin_url
-    - **template_type**: Email template type from available templates. Uses sales_outreach if not provided.
+    - **file**: CSV file with required columns: name, company, linkedin_url
+              Optional columns: intelligence (true/false), template_type (template name)
+    - **template_type**: Fallback email template type when template_type column is empty. Uses sales_outreach if not provided.
+    
+    **CSV Column Details:**
+    - **name** (required): Contact's name
+    - **company** (required): Contact's company name  
+    - **linkedin_url** (required): Contact's LinkedIn profile URL
+    - **intelligence** (optional): true/false - Use AI research and generation vs templates
+    - **template_type** (optional): Per-row template selection (overrides the fallback template_type parameter)
     
     Available template types: sales_outreach, recruitment, networking, partnership, follow_up, introduction, cold_email
     
-    Batch size is configured via BATCH_SIZE environment variable (default: 100).
+    **Processing Architecture:**
+    - **Template emails** (intelligence=false): Processed IMMEDIATELY (~0.01s per email)
+    - **AI emails** (intelligence=true): Processed in BACKGROUND (~3-8s per email)
+    - **Immediate Response**: CSV with template emails + UUID placeholders for AI emails
+    - **Background Logging**: AI results logged to JSON files when complete
     
-    Returns: CSV file with original data plus generated_email column
+    **Response Headers:**
+    - X-Request-ID: Unique identifier for tracking background processing
+    - X-Immediate-Emails: Number of template emails returned immediately
+    - X-Background-AI-Emails: Number of AI emails processing in background
+    - X-AI-Status: "processing" or "none"
+    - X-JSON-Logs: Pattern for finding AI result JSON files
+    
+    Returns: CSV file with template emails + AI placeholders (UUIDs)
     """
     
     # Validate file type
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="File must be a CSV")
-    
-    # Get template content from repository
-    email_template = get_template_content(template_type)
     
     # Read file contents
     contents = await file.read()
@@ -261,46 +271,44 @@ async def generate_emails(
         # Parse CSV data
         df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
         
-        # Validate required columns
-        required_columns = ['name', 'company', 'linkedin_url']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Missing required columns: {', '.join(missing_columns)}. Required: {', '.join(required_columns)}"
+        # Validate CSV content and structure
+        validate_csv_not_empty(df)
+        df = validate_and_enhance_csv(df)
+        validate_csv_size(df, MAX_CSV_ROWS)
+        
+        # BACKGROUND PROCESSING: Split DataFrame for immediate vs background processing
+        ai_rows, template_rows = split_dataframe_by_intelligence(df)
+        
+        # Generate unique request ID for tracking
+        request_id = generate_request_id()
+        
+        print(f"Request {request_id}: Processing {len(df)} rows")
+        print(f"   Template emails: {len(template_rows)} (immediate)")
+        print(f"   AI emails: {len(ai_rows)} (background)")
+        
+        # 1. Process template emails IMMEDIATELY
+        template_results = {}
+        if not template_rows.empty:
+            print(f"Processing {len(template_rows)} template emails immediately...")
+            import time
+            start_time = time.time()
+            template_results = await process_template_dataframe(template_rows, template_type)
+            template_time = time.time() - start_time
+            print(f"Template emails completed in {template_time:.3f}s")
+        
+        # 2. Add placeholder UUIDs for AI emails
+        ai_placeholders, ai_uuid_mapping = create_ai_placeholders(ai_rows)
+        
+        # 3. Combine immediate results with AI placeholders
+        all_results = {**template_results, **ai_placeholders}
+        generated_emails = merge_results_in_order(df, all_results)
+        
+        # 4. Start background AI processing (fire and forget)
+        if not ai_rows.empty:
+            print(f"Starting background AI processing for request {request_id}")
+            asyncio.create_task(
+                process_ai_emails_background(request_id, ai_rows, template_type, ai_uuid_mapping)
             )
-        
-        # Check if CSV has data
-        if df.empty:
-            raise HTTPException(status_code=400, detail="CSV file is empty")
-        
-        # Validate CSV size limits
-        if len(df) > MAX_CSV_ROWS:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"CSV too large. Maximum allowed rows: {MAX_CSV_ROWS}, received: {len(df)}"
-            )
-        
-        # Create template object
-        jinja_template = Template(email_template)
-        
-        # Split DataFrame into batches for efficient processing
-        batches = create_batches(df, BATCH_SIZE)
-        total_batches = len(batches)
-        
-        print(f"Processing {len(df)} rows in {total_batches} batches of {BATCH_SIZE}")
-        
-        # Process batches sequentially, but rows within each batch in parallel
-        all_generated_emails = []
-        for batch_idx, batch_df in enumerate(batches, 1):
-            print(f"Processing batch {batch_idx}/{total_batches} ({len(batch_df)} rows)")
-            
-            # Process current batch in parallel
-            batch_emails = await process_batch(batch_df, jinja_template)
-            all_generated_emails.extend(batch_emails)
-        
-        # Combine all generated emails
-        generated_emails = all_generated_emails
         
         # Add generated emails to dataframe
         df['generated_email'] = generated_emails
@@ -314,22 +322,26 @@ async def generate_emails(
         def iter_csv():
             yield csv_content
         
-        print(f"Successfully generated {len(generated_emails)} emails in {total_batches} batches")
+        immediate_emails = len(template_rows)
+        background_emails = len(ai_rows) 
+        print(f"Request {request_id}: Returning {immediate_emails} immediate emails, {background_emails} processing in background")
         
         # Calculate final file size for headers
-        final_size_mb = round(len(csv_content) / (1024 * 1024), 2)
+        final_size_mb = calculate_file_size_mb(csv_content)
         
         return StreamingResponse(
             iter_csv(),
             media_type="text/csv; charset=utf-8",
             headers={
                 "Content-Disposition": f"attachment; filename=generated_{file.filename}",
-                "Content-Length": str(len(csv_content)),
+                "X-Request-ID": request_id,
                 "X-Total-Rows": str(len(df)),
-                "X-Batch-Size": str(BATCH_SIZE),
-                "X-Total-Batches": str(total_batches),
+                "X-Immediate-Emails": str(len(template_rows)),
+                "X-Background-AI-Emails": str(len(ai_rows)),
+                "X-Processing-Method": "background",
                 "X-Template-Type": template_type.value if template_type else DEFAULT_TEMPLATE_TYPE.value,
-                "X-Processing-Time": "Available in server logs",
+                "X-AI-Status": "processing" if len(ai_rows) > 0 else "none",
+                "X-JSON-Logs": "ai_results_*.json" if len(ai_rows) > 0 else "none",
                 "X-File-Size-MB": str(final_size_mb),
                 "X-Original-Filename": file.filename,
                 "Cache-Control": "no-cache, no-store, must-revalidate",
