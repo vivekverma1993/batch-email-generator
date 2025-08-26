@@ -5,6 +5,10 @@ import pandas as pd
 import io
 import asyncio
 import os
+import time
+import uuid
+import json
+from datetime import datetime
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 
@@ -155,9 +159,9 @@ async def process_emails_metadata(
                 detail=f"CSV too large. Maximum allowed rows: {MAX_CSV_ROWS}, received: {len(df)}"
             )
         
-        # Calculate batch information
-        batches = create_batches(df, BATCH_SIZE)
-        total_batches = len(batches)
+        # Calculate processing information for new parallel approach
+        ai_rows = df[df['intelligence'] == True]
+        template_rows = df[df['intelligence'] == False]
         
         # Generate sample emails from first few rows
         sample_size = min(3, len(df))
@@ -170,6 +174,8 @@ async def process_emails_metadata(
                 "name": str(row['name']),
                 "company": str(row['company']),
                 "linkedin_url": str(row['linkedin_url']),
+                "intelligence": row.get('intelligence', False),
+                "template_type": row.get('template_type', ''),
                 "generated_email": email[:200] + "..." if len(email) > 200 else email
             })
         
@@ -183,8 +189,10 @@ async def process_emails_metadata(
             },
             "processing_info": {
                 "total_rows": len(df),
-                "batch_size": BATCH_SIZE,
-                "total_batches": total_batches,
+                "ai_rows": len(ai_rows),
+                "template_rows": len(template_rows),
+                "processing_method": "parallel",
+                "ai_batch_size": INTELLIGENCE_BATCH_SIZE,
                 "estimated_output_size_mb": round((len(df) * 1000) / (1024 * 1024), 1)  # Rough estimate
             },
             "template_info": get_template_info(template_type),
@@ -349,6 +357,161 @@ async def generate_template_email(row: pd.Series, fallback_template_type: Option
     except Exception as e:
         return f"Error generating template email: {str(e)}"
 
+async def process_ai_dataframe(ai_df: pd.DataFrame, fallback_template_type: Optional[TemplateType] = None) -> dict:
+    """Process AI DataFrame with smaller batches and rate limiting"""
+    if ai_df.empty:
+        return {}
+    
+    print(f"AI TASK STARTED: Processing {len(ai_df)} rows with OpenAI")
+    start_time = time.time()
+    results = {}
+    
+    # Use smaller batches for AI processing to manage API rate limits
+    ai_batches = create_batches(ai_df, INTELLIGENCE_BATCH_SIZE)
+    print(f"    AI processing: {len(ai_df)} rows in {len(ai_batches)} batches of {INTELLIGENCE_BATCH_SIZE}")
+    
+    for batch_idx, batch_df in enumerate(ai_batches, 1):
+        batch_start = time.time()
+        print(f"    AI batch {batch_idx}/{len(ai_batches)} ({len(batch_df)} rows) - starting...")
+        
+        # Process AI batch with concurrent tasks
+        batch_tasks = []
+        for _, row in batch_df.iterrows():
+            task = generate_intelligent_email(row, fallback_template_type)
+            batch_tasks.append((row.name, task))
+        
+        batch_results = await asyncio.gather(*[task for _, task in batch_tasks])
+        
+        # Store results with original index
+        for (original_idx, _), result in zip(batch_tasks, batch_results):
+            results[original_idx] = result
+        
+        batch_time = time.time() - batch_start
+        print(f"    AI batch {batch_idx}/{len(ai_batches)} completed in {batch_time:.2f}s")
+        
+        # Add small delay between AI batches for rate limiting
+        if batch_idx < len(ai_batches):
+            await asyncio.sleep(0.5)
+    
+    total_ai_time = time.time() - start_time
+    print(f"  AI TASK COMPLETED: {len(results)} emails in {total_ai_time:.2f}s")
+    
+    return results
+
+
+async def process_template_dataframe(template_df: pd.DataFrame, fallback_template_type: Optional[TemplateType] = None) -> dict:
+    """Process template DataFrame with large batches (fast processing)"""
+    if template_df.empty:
+        return {}
+    
+    print(f"  TEMPLATE TASK STARTED: Processing {len(template_df)} rows (concurrent)")
+    start_time = time.time()
+    
+    # Template generation is fast, so we can use larger batches
+    template_tasks = []
+    for _, row in template_df.iterrows():
+        task = generate_template_email(row, fallback_template_type)
+        template_tasks.append((row.name, task))
+    
+    # Process all template emails concurrently (they're fast)
+    template_results = await asyncio.gather(*[task for _, task in template_tasks])
+    
+    # Store results with original index
+    results = {}
+    for (original_idx, _), result in zip(template_tasks, template_results):
+        results[original_idx] = result
+    
+    template_time = time.time() - start_time
+    print(f"  TEMPLATE TASK COMPLETED: {len(results)} emails in {template_time:.3f}s")
+    
+    return results
+
+
+def merge_results_in_order(original_df: pd.DataFrame, results: dict) -> list[str]:
+    """Merge results back in original DataFrame order"""
+    ordered_emails = []
+    for _, row in original_df.iterrows():
+        email = results.get(row.name, "Error: No result generated")
+        ordered_emails.append(email)
+    
+    return ordered_emails
+
+
+def log_ai_results_to_json(request_id: str, ai_results: dict, original_ai_rows: pd.DataFrame, processing_time: float, ai_uuid_mapping: Optional[dict] = None):
+    """Log completed AI email results to structured JSON file"""
+    try:
+        # Prepare structured data
+        log_entry = {
+            "request_id": request_id,
+            "timestamp": datetime.now().isoformat(),
+            "processing_time_seconds": round(processing_time, 2),
+            "total_ai_emails": len(ai_results),
+            "results": []
+        }
+        
+        # Add each AI result
+        for _, row in original_ai_rows.iterrows():
+            # Use the same UUID that was used in the CSV placeholder
+            row_uuid = ai_uuid_mapping.get(row.name) if ai_uuid_mapping else str(uuid.uuid4())
+            
+            result_data = {
+                "uuid": row_uuid,  # Use the same UUID from CSV placeholder
+                "name": str(row['name']),
+                "company": str(row['company']),
+                "linkedin_url": str(row['linkedin_url']),
+                "template_type": str(row.get('template_type', '')),
+                "generated_email": ai_results.get(row.name, "Error: No result generated"),
+                "row_index": int(row.name) if pd.notna(row.name) else None
+            }
+            log_entry["results"].append(result_data)
+        
+        # Write to JSON file in root folder
+        filename = f"ai_results_{request_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(log_entry, f, indent=2, ensure_ascii=False)
+        
+        print(f"AI results logged to {filename}")
+        
+    except Exception as e:
+        print(f"Error logging AI results: {str(e)}")
+
+
+async def process_ai_emails_background(request_id: str, ai_rows: pd.DataFrame, fallback_template_type: Optional[TemplateType] = None, ai_uuid_mapping: Optional[dict] = None):
+    """Background processing of AI emails with JSON logging"""
+    try:
+        print(f"Starting background AI processing for request {request_id}")
+        start_time = time.time()
+        
+        # Process AI emails
+        ai_results = await process_ai_dataframe(ai_rows, fallback_template_type)
+        
+        processing_time = time.time() - start_time
+        print(f"Background AI processing completed for request {request_id} in {processing_time:.2f}s")
+        
+        # Log results to JSON
+        log_ai_results_to_json(request_id, ai_results, ai_rows, processing_time, ai_uuid_mapping)
+        
+    except Exception as e:
+        print(f"Background AI processing failed for request {request_id}: {str(e)}")
+        
+        # Log error to JSON
+        error_entry = {
+            "request_id": request_id,
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e),
+            "status": "failed",
+            "total_ai_emails": len(ai_rows)
+        }
+        
+        filename = f"ai_error_{request_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(error_entry, f, indent=2, ensure_ascii=False)
+            print(f"AI error logged to {filename}")
+        except Exception as log_error:
+            print(f"Failed to log AI error: {str(log_error)}")
+
+
 # TODO: asyncio.gather has some disadvantages like missing error handling and memory usage.
 # TODO: Consider using a different approach for batch processing. like using a asyncio.TaskGroup
 # to manage the tasks and handle errors.
@@ -376,7 +539,7 @@ async def generate_emails(
     template_type: Optional[TemplateType] = Form(None, description="Fallback template type when CSV template_type column is empty. Uses sales_outreach if not provided.")
 ):
     """
-    Generate personalized emails from CSV data using batch processing
+    Generate personalized emails from CSV data using background processing for optimal UX
     
     - **file**: CSV file with required columns: name, company, linkedin_url
               Optional columns: intelligence (true/false), template_type (template name)
@@ -386,18 +549,25 @@ async def generate_emails(
     - **name** (required): Contact's name
     - **company** (required): Contact's company name  
     - **linkedin_url** (required): Contact's LinkedIn profile URL
-    - **intelligence** (optional): true/false - Use AI research and generation (not implemented in Phase 1)
+    - **intelligence** (optional): true/false - Use AI research and generation vs templates
     - **template_type** (optional): Per-row template selection (overrides the fallback template_type parameter)
     
     Available template types: sales_outreach, recruitment, networking, partnership, follow_up, introduction, cold_email
     
-    **Processing Logic:**
-    - Each row can specify its own template_type for personalized template selection
-    - If template_type column is empty/missing, falls back to the template_type parameter
-    - Batch size is configured via BATCH_SIZE environment variable (default: 100)
-    - Intelligence column prepares for future AI-enhanced email generation
+    **Processing Architecture:**
+    - **Template emails** (intelligence=false): Processed IMMEDIATELY (~0.01s per email)
+    - **AI emails** (intelligence=true): Processed in BACKGROUND (~3-8s per email)
+    - **Immediate Response**: CSV with template emails + UUID placeholders for AI emails
+    - **Background Logging**: AI results logged to JSON files when complete
     
-    Returns: CSV file with original data plus generated_email column
+    **Response Headers:**
+    - X-Request-ID: Unique identifier for tracking background processing
+    - X-Immediate-Emails: Number of template emails returned immediately
+    - X-Background-AI-Emails: Number of AI emails processing in background
+    - X-AI-Status: "processing" or "none"
+    - X-JSON-Logs: Pattern for finding AI result JSON files
+    
+    Returns: CSV file with template emails + AI placeholders (UUIDs)
     """
     
     # Validate file type
@@ -425,23 +595,46 @@ async def generate_emails(
                 detail=f"CSV too large. Maximum allowed rows: {MAX_CSV_ROWS}, received: {len(df)}"
             )
         
-        # Split DataFrame into batches for efficient processing
-        batches = create_batches(df, BATCH_SIZE)
-        total_batches = len(batches)
+        # BACKGROUND PROCESSING: Split DataFrame for immediate vs background processing
+        ai_rows = df[df['intelligence'] == True].copy()
+        template_rows = df[df['intelligence'] == False].copy()
         
-        print(f"Processing {len(df)} rows in {total_batches} batches of {BATCH_SIZE}")
+        # Generate unique request ID for tracking
+        request_id = str(uuid.uuid4())[:8]  # Short UUID for easy reference
         
-        # Process batches sequentially, but rows within each batch in parallel
-        all_generated_emails = []
-        for batch_idx, batch_df in enumerate(batches, 1):
-            print(f"Processing batch {batch_idx}/{total_batches} ({len(batch_df)} rows)")
-            
-            # Process current batch in parallel (each row can have its own template)
-            batch_emails = await process_batch(batch_df, template_type)
-            all_generated_emails.extend(batch_emails)
+        print(f"Request {request_id}: Processing {len(df)} rows")
+        print(f"   Template emails: {len(template_rows)} (immediate)")
+        print(f"   AI emails: {len(ai_rows)} (background)")
         
-        # Combine all generated emails
-        generated_emails = all_generated_emails
+        # 1. Process template emails IMMEDIATELY
+        template_results = {}
+        if not template_rows.empty:
+            print(f"Processing {len(template_rows)} template emails immediately...")
+            start_time = time.time()
+            template_results = await process_template_dataframe(template_rows, template_type)
+            template_time = time.time() - start_time
+            print(f"Template emails completed in {template_time:.3f}s")
+        
+        # 2. Add placeholder UUIDs for AI emails
+        ai_placeholders = {}
+        ai_uuid_mapping = {}  # Store UUIDs for later use in JSON logging
+        if not ai_rows.empty:
+            print(f"Adding placeholder UUIDs for {len(ai_rows)} AI emails...")
+            for _, row in ai_rows.iterrows():
+                placeholder_uuid = str(uuid.uuid4())
+                ai_placeholders[row.name] = f"AI_PROCESSING:{placeholder_uuid}"
+                ai_uuid_mapping[row.name] = placeholder_uuid  # Store for JSON logging
+        
+        # 3. Combine immediate results with AI placeholders
+        all_results = {**template_results, **ai_placeholders}
+        generated_emails = merge_results_in_order(df, all_results)
+        
+        # 4. Start background AI processing (fire and forget)
+        if not ai_rows.empty:
+            print(f"Starting background AI processing for request {request_id}")
+            asyncio.create_task(
+                process_ai_emails_background(request_id, ai_rows, template_type, ai_uuid_mapping)
+            )
         
         # Add generated emails to dataframe
         df['generated_email'] = generated_emails
@@ -455,7 +648,9 @@ async def generate_emails(
         def iter_csv():
             yield csv_content
         
-        print(f"Successfully generated {len(generated_emails)} emails in {total_batches} batches")
+        immediate_emails = len(template_rows)
+        background_emails = len(ai_rows) 
+        print(f"Request {request_id}: Returning {immediate_emails} immediate emails, {background_emails} processing in background")
         
         # Calculate final file size for headers
         final_size_mb = round(len(csv_content) / (1024 * 1024), 2)
@@ -465,11 +660,14 @@ async def generate_emails(
             media_type="text/csv; charset=utf-8",
             headers={
                 "Content-Disposition": f"attachment; filename=generated_{file.filename}",
+                "X-Request-ID": request_id,
                 "X-Total-Rows": str(len(df)),
-                "X-Batch-Size": str(BATCH_SIZE),
-                "X-Total-Batches": str(total_batches),
+                "X-Immediate-Emails": str(len(template_rows)),
+                "X-Background-AI-Emails": str(len(ai_rows)),
+                "X-Processing-Method": "background",
                 "X-Template-Type": template_type.value if template_type else DEFAULT_TEMPLATE_TYPE.value,
-                "X-Processing-Time": "Available in server logs",
+                "X-AI-Status": "processing" if len(ai_rows) > 0 else "none",
+                "X-JSON-Logs": "ai_results_*.json" if len(ai_rows) > 0 else "none",
                 "X-File-Size-MB": str(final_size_mb),
                 "X-Original-Filename": file.filename,
                 "Cache-Control": "no-cache, no-store, must-revalidate",
