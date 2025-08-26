@@ -20,15 +20,23 @@ from .templates import (
     get_template_info
 )
 
+# Import AI and research functionality
+from .linkedin_research import research_linkedin_profile
+from .ai_generator import generate_ai_email
+
 # Configuration settings
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "100"))  # Default: 100, configurable via environment
 MAX_BATCH_SIZE = int(os.getenv("MAX_BATCH_SIZE", "1000"))  # Maximum allowed batch size
 MAX_CSV_ROWS = int(os.getenv("MAX_CSV_ROWS", "50000"))  # Maximum CSV rows to process
 
+# AI-specific configuration
+INTELLIGENCE_BATCH_SIZE = int(os.getenv("INTELLIGENCE_BATCH_SIZE", "5"))  # Smaller batches for AI processing
+AI_FALLBACK_TO_TEMPLATE = os.getenv("AI_FALLBACK_TO_TEMPLATE", "true").lower() == "true"
+
 app = FastAPI(
     title="Batch Email Generator",
-    description="Generate personalized outreach emails from CSV data using configurable templates and async batch processing",
-    version="1.0.0",
+    description="Generate personalized outreach emails from CSV data using configurable templates, fake LinkedIn research, and AI-powered generation",
+    version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -39,7 +47,14 @@ async def root():
     """Root endpoint with basic information"""
     return {
         "message": "Welcome to Batch Email Generator API",
-        "version": "1.0.0",
+        "version": "2.0.0",
+        "features": [
+            "Template-based email generation",
+            "Fake LinkedIn research",
+            "AI-powered personalization", 
+            "Industry-aware data generation",
+            "Batch processing with fallback"
+        ],
         "endpoints": {
             "health": "/health",
             "docs": "/docs",
@@ -52,14 +67,29 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint to verify service is running"""
+    # Check AI configuration
+    try:
+        from .ai_generator import validate_ai_configuration
+        ai_valid, ai_error = validate_ai_configuration()
+        ai_status = "configured" if ai_valid else f"not configured: {ai_error}"
+    except Exception as e:
+        ai_status = f"error: {str(e)}"
+    
     return {
         "status": "healthy", 
         "message": "Batch Email Generator is running",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "config": {
             "batch_size": BATCH_SIZE,
             "max_batch_size": MAX_BATCH_SIZE,
-            "max_csv_rows": MAX_CSV_ROWS
+            "max_csv_rows": MAX_CSV_ROWS,
+            "intelligence_batch_size": INTELLIGENCE_BATCH_SIZE,
+            "ai_fallback_enabled": AI_FALLBACK_TO_TEMPLATE
+        },
+        "capabilities": {
+            "templates": "available",
+            "fake_linkedin_research": "available",
+            "ai_generation": ai_status
         }
     }
 
@@ -223,7 +253,69 @@ def render_email_template(template_str: str, name: str, company: str, linkedin_u
         return f"Error rendering template: {str(e)}"
 
 async def generate_single_email(row: pd.Series, fallback_template_type: Optional[TemplateType] = None) -> str:
-    """Generate a single personalized email using row-specific or fallback template"""
+    """Generate a single personalized email using AI research or templates based on intelligence column"""
+    try:
+        use_intelligence = row.get('intelligence', False)
+        
+        if use_intelligence:
+            return await generate_intelligent_email(row, fallback_template_type)
+        else:
+            return await generate_template_email(row, fallback_template_type)
+    
+    except Exception as e:
+        return f"Error generating email: {str(e)}"
+
+
+async def generate_intelligent_email(row: pd.Series, fallback_template_type: Optional[TemplateType] = None) -> str:
+    """Generate AI-enhanced email using fake LinkedIn research and OpenAI"""
+    try:
+        user_info = {
+            'name': str(row.get('name', '')),
+            'company': str(row.get('company', '')),
+            'linkedin_url': str(row.get('linkedin_url', ''))
+        }
+        
+        # Determine template type for AI prompt
+        row_template_type = row.get('template_type')
+        if row_template_type and row_template_type.strip():
+            try:
+                template_type = TemplateType(row_template_type.strip())
+            except (ValueError, AttributeError):
+                template_type = fallback_template_type
+        else:
+            template_type = fallback_template_type
+        
+        template_type_str = template_type.value if template_type else 'sales_outreach'
+        
+        # Generate fake LinkedIn research
+        research_result = await research_linkedin_profile(
+            name=user_info['name'], 
+            company=user_info['company'], 
+            linkedin_url=user_info['linkedin_url']
+        )
+        
+        # Generate AI email
+        ai_result = await generate_ai_email(research_result, user_info, template_type_str)
+        
+        if ai_result.status.value == "success":
+            return ai_result.email_content or "[AI generation succeeded but no content returned]"
+        else:
+            if AI_FALLBACK_TO_TEMPLATE:
+                print(f"AI generation failed ({ai_result.error_message}), falling back to template for {user_info['name']}")
+                return await generate_template_email(row, fallback_template_type)
+            else:
+                return f"AI generation failed: {ai_result.error_message}"
+    
+    except Exception as e:
+        if AI_FALLBACK_TO_TEMPLATE:
+            print(f"Unexpected error in AI generation ({str(e)}), falling back to template")
+            return await generate_template_email(row, fallback_template_type)
+        else:
+            return f"Error in AI email generation: {str(e)}"
+
+
+async def generate_template_email(row: pd.Series, fallback_template_type: Optional[TemplateType] = None) -> str:
+    """Generate traditional template-based email"""
     try:
         # Determine template type for this row
         row_template_type = row.get('template_type')
@@ -255,7 +347,7 @@ async def generate_single_email(row: pd.Series, fallback_template_type: Optional
         return email_content.strip()
     
     except Exception as e:
-        return f"Error generating email: {str(e)}"
+        return f"Error generating template email: {str(e)}"
 
 # TODO: asyncio.gather has some disadvantages like missing error handling and memory usage.
 # TODO: Consider using a different approach for batch processing. like using a asyncio.TaskGroup
@@ -373,7 +465,6 @@ async def generate_emails(
             media_type="text/csv; charset=utf-8",
             headers={
                 "Content-Disposition": f"attachment; filename=generated_{file.filename}",
-                "Content-Length": str(len(csv_content)),
                 "X-Total-Rows": str(len(df)),
                 "X-Batch-Size": str(BATCH_SIZE),
                 "X-Total-Batches": str(total_batches),
