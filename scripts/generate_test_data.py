@@ -2,13 +2,25 @@
 """
 Configurable CSV Test Data Generator for Batch Email Generator
 
+Generates CSV files with enhanced features including:
+- Basic columns: name, company, linkedin_url
+- Intelligence column: true/false for AI research (30% true)
+- Template_type column: random template selection from src/templates.py (20% empty for fallback testing)
+
 Usage:
-    python scripts/generate_test_data.py [number_of_entries] [output_filename]
+    python scripts/generate_test_data.py [number_of_entries] [output_filename] [--legacy]
     
 Examples:
-    python scripts/generate_test_data.py 100                          # 100 entries -> uploads/test_data_100.csv
-    python scripts/generate_test_data.py 10000                        # 10000 entries -> uploads/test_data_10000.csv
-    python scripts/generate_test_data.py 5000 my_custom_data.csv       # 5000 entries -> uploads/my_custom_data.csv
+    python scripts/generate_test_data.py 100                          # 100 entries -> uploads/test_data_100.csv (enhanced)
+    python scripts/generate_test_data.py 10000                        # 10000 entries -> uploads/test_data_10000.csv (enhanced)
+    python scripts/generate_test_data.py 5000 my_custom_data.csv       # 5000 entries -> uploads/my_custom_data.csv (enhanced)
+    python scripts/generate_test_data.py 1000 legacy_data.csv --legacy # 1000 entries -> uploads/legacy_data.csv (old format)
+
+Enhanced CSV Format:
+    name,company,linkedin_url,intelligence,template_type
+    
+Legacy CSV Format (backwards compatibility):
+    name,company,linkedin_url
 """
 
 import csv
@@ -16,6 +28,10 @@ import random
 import sys
 import os
 from pathlib import Path
+
+# Import template types from the main application
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from src.templates import TemplateType
 
 # Lists of fake data for generating realistic entries
 FIRST_NAMES = [
@@ -93,6 +109,9 @@ COMPANY_TYPES = [
     "Cybersecurity", "Cloud Computing", "DevOps", "Mobile", "Web", "E-commerce"
 ]
 
+# Available email template types (dynamically imported from src/templates.py)
+TEMPLATE_TYPES = [template_type.value for template_type in TemplateType]
+
 def generate_name():
     """Generate a random full name"""
     first = random.choice(FIRST_NAMES)
@@ -132,9 +151,28 @@ def generate_linkedin_url(name):
     username = random.choice(variations)
     return f"https://linkedin.com/in/{username}"
 
+def generate_intelligence():
+    """Generate a random boolean value for intelligence column
+    
+    Returns 'true' or 'false' as strings (30% chance of 'true' for AI research)
+    """
+    # 30% chance of using AI intelligence, 70% traditional templates
+    return "true" if random.random() < 0.3 else "false"
+
+def generate_template_type():
+    """Generate a random template type or empty string
+    
+    Returns template type string or empty string (20% chance of empty for fallback testing)
+    """
+    # 20% chance of empty string to test fallback behavior
+    if random.random() < 0.2:
+        return ""
+    
+    return random.choice(TEMPLATE_TYPES)
+
 def generate_test_csv(filename, num_entries=1000):
-    """Generate a CSV file with fake test data"""
-    print(f"Generating {num_entries:,} fake entries...")
+    """Generate a CSV file with fake test data including enhanced features"""
+    print(f"Generating {num_entries:,} fake entries with enhanced features...")
     
     # Ensure uploads directory exists
     uploads_dir = Path("uploads")
@@ -143,6 +181,65 @@ def generate_test_csv(filename, num_entries=1000):
     filepath = uploads_dir / filename
     
     with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+        # Updated fieldnames to include new columns
+        fieldnames = ['name', 'company', 'linkedin_url', 'intelligence', 'template_type']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        
+        # Write header
+        writer.writeheader()
+        
+        # Generate entries
+        progress_interval = max(1, num_entries // 20)  # Show progress 20 times
+        
+        for i in range(num_entries):
+            name = generate_name()
+            company = generate_company()
+            linkedin_url = generate_linkedin_url(name)
+            intelligence = generate_intelligence()
+            template_type = generate_template_type()
+            
+            writer.writerow({
+                'name': name,
+                'company': company,
+                'linkedin_url': linkedin_url,
+                'intelligence': intelligence,
+                'template_type': template_type
+            })
+            
+            # Progress indicator
+            if (i + 1) % progress_interval == 0:
+                progress = ((i + 1) / num_entries) * 100
+                print(f"Progress: {i + 1:,}/{num_entries:,} entries ({progress:.1f}%)")
+    
+    file_size = filepath.stat().st_size
+    file_size_mb = file_size / (1024 * 1024)
+    
+    print(f"Successfully generated {filepath}")
+    print(f"File size: {file_size_mb:.2f} MB ({file_size:,} bytes)")
+    print(f"Total entries: {num_entries:,} + header = {num_entries + 1:,} lines")
+    
+    # Show statistics about generated data
+    print("\nData Distribution:")
+    intelligence_true_count = sum(1 for _ in range(num_entries) if random.random() < 0.3)
+    template_empty_count = sum(1 for _ in range(num_entries) if random.random() < 0.2)
+    print(f"  AI Intelligence (approx): ~{intelligence_true_count:,} entries (~30%)")
+    print(f"  Empty template_type (approx): ~{template_empty_count:,} entries (~20%)")
+    print(f"  Available templates: {', '.join(TEMPLATE_TYPES)}")
+    
+    return str(filepath)
+
+def generate_legacy_csv(filename, num_entries=1000):
+    """Generate a CSV file with legacy format (backwards compatibility testing)"""
+    print(f"Generating {num_entries:,} legacy format entries...")
+    
+    # Ensure uploads directory exists
+    uploads_dir = Path("uploads")
+    uploads_dir.mkdir(exist_ok=True)
+    
+    filepath = uploads_dir / filename
+    
+    with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+        # Legacy fieldnames (original format)
         fieldnames = ['name', 'company', 'linkedin_url']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         
@@ -171,9 +268,10 @@ def generate_test_csv(filename, num_entries=1000):
     file_size = filepath.stat().st_size
     file_size_mb = file_size / (1024 * 1024)
     
-    print(f"Successfully generated {filepath}")
+    print(f"Successfully generated {filepath} (legacy format)")
     print(f"File size: {file_size_mb:.2f} MB ({file_size:,} bytes)")
     print(f"Total entries: {num_entries:,} + header = {num_entries + 1:,} lines")
+    print("Note: This CSV uses the legacy format for backwards compatibility testing")
     
     return str(filepath)
 
@@ -181,26 +279,33 @@ def main():
     """Main function to handle command-line arguments"""
     # Default values
     default_entries = 1000
+    legacy_mode = False
     
-    # Parse command-line arguments
-    if len(sys.argv) == 1:
+    # Check for --legacy flag
+    args = sys.argv[1:]
+    if '--legacy' in args:
+        legacy_mode = True
+        args.remove('--legacy')
+    
+    # Parse remaining command-line arguments
+    if len(args) == 0:
         # No arguments - use defaults
         num_entries = default_entries
         filename = f"test_data_{num_entries}.csv"
-    elif len(sys.argv) == 2:
+    elif len(args) == 1:
         # Only number of entries provided
         try:
-            num_entries = int(sys.argv[1])
+            num_entries = int(args[0])
             filename = f"test_data_{num_entries}.csv"
         except ValueError:
             print("Error: Number of entries must be a valid integer")
             print_usage()
             sys.exit(1)
-    elif len(sys.argv) == 3:
+    elif len(args) == 2:
         # Both number and filename provided
         try:
-            num_entries = int(sys.argv[1])
-            filename = sys.argv[2]
+            num_entries = int(args[0])
+            filename = args[1]
             if not filename.endswith('.csv'):
                 filename += '.csv'
         except ValueError:
@@ -225,16 +330,42 @@ def main():
             sys.exit(0)
     
     # Generate the data
-    print(f"Target: {num_entries:,} entries -> uploads/{filename}")
-    generated_file = generate_test_csv(filename, num_entries)
+    format_type = "legacy" if legacy_mode else "enhanced"
+    print(f"Target: {num_entries:,} entries -> uploads/{filename} ({format_type} format)")
+    
+    if legacy_mode:
+        generated_file = generate_legacy_csv(filename, num_entries)
+    else:
+        generated_file = generate_test_csv(filename, num_entries)
     
     # Show recommended batch sizes for testing
+    print("\nRecommended Batch Sizes for Testing:")
     for batch_size in [10, 25, 50, 100, 200]:
         batches = (num_entries + batch_size - 1) // batch_size  # Ceiling division
         print(f"   BATCH_SIZE={batch_size:3d} -> {batches:4d} batches")
 
 def print_usage():
     """Print usage information"""
+    print("""
+Usage: python scripts/generate_test_data.py [number_of_entries] [output_filename] [--legacy]
+
+Arguments:
+    number_of_entries    Number of CSV entries to generate (default: 1000)
+    output_filename      Output filename (default: test_data_[number].csv)
+    --legacy            Generate legacy format CSV (name,company,linkedin_url only)
+
+Examples:
+    python scripts/generate_test_data.py
+    python scripts/generate_test_data.py 500
+    python scripts/generate_test_data.py 5000 custom_data.csv
+    python scripts/generate_test_data.py 1000 legacy_test.csv --legacy
+
+Enhanced format (default):
+    name,company,linkedin_url,intelligence,template_type
+
+Legacy format (--legacy):
+    name,company,linkedin_url
+    """)
 
 if __name__ == "__main__":
     main()

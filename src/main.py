@@ -75,7 +75,7 @@ async def get_available_templates():
 @app.post("/process-emails-metadata")
 async def process_emails_metadata(
     file: UploadFile = File(...),
-    template_type: Optional[TemplateType] = Form(None, description="Email template type. Uses sales_outreach if not provided.")
+    template_type: Optional[TemplateType] = Form(None, description="Fallback template type when CSV template_type column is empty. Uses sales_outreach if not provided.")
 ):
     """
     Process CSV and return metadata only (for testing large files via Swagger UI)
@@ -84,8 +84,16 @@ async def process_emails_metadata(
     only metadata instead of the full processed file. For testing large datasets
     through Swagger UI without download limitations.
     
-    - **file**: CSV file with columns: name, company, linkedin_url
-    - **template_type**: Email template type from available templates. Uses sales_outreach if not provided.
+    - **file**: CSV file with required columns: name, company, linkedin_url
+              Optional columns: intelligence (true/false), template_type (template name)
+    - **template_type**: Fallback email template type when template_type column is empty. Uses sales_outreach if not provided.
+    
+    **CSV Column Details:**
+    - **name** (required): Contact's name
+    - **company** (required): Contact's company name
+    - **linkedin_url** (required): Contact's LinkedIn profile URL
+    - **intelligence** (optional): true/false - Use AI research and generation (not implemented in Phase 1)
+    - **template_type** (optional): Per-row template selection (overrides the fallback template_type parameter)
     
     Available template types: sales_outreach, recruitment, networking, partnership, follow_up, introduction, cold_email
     
@@ -96,9 +104,6 @@ async def process_emails_metadata(
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="File must be a CSV")
     
-    # Get template content from repository
-    email_template = get_template_content(template_type)
-    
     # Read file contents
     contents = await file.read()
     
@@ -106,18 +111,12 @@ async def process_emails_metadata(
         # Parse CSV data
         df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
         
-        # Validate required columns
-        required_columns = ['name', 'company', 'linkedin_url']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Missing required columns: {', '.join(missing_columns)}. Required: {', '.join(required_columns)}"
-            )
-        
         # Check if CSV has data
         if df.empty:
             raise HTTPException(status_code=400, detail="CSV file is empty")
+        
+        # Validate required columns and add optional columns with defaults
+        df = validate_and_enhance_csv(df)
         
         # Validate CSV size limits
         if len(df) > MAX_CSV_ROWS:
@@ -125,9 +124,6 @@ async def process_emails_metadata(
                 status_code=400, 
                 detail=f"CSV too large. Maximum allowed rows: {MAX_CSV_ROWS}, received: {len(df)}"
             )
-        
-        # Create Jinja2 template object
-        jinja_template = Template(email_template)
         
         # Calculate batch information
         batches = create_batches(df, BATCH_SIZE)
@@ -139,7 +135,7 @@ async def process_emails_metadata(
         
         sample_emails = []
         for _, row in sample_df.iterrows():
-            email = await generate_single_email(row, jinja_template)
+            email = await generate_single_email(row, template_type)
             sample_emails.append({
                 "name": str(row['name']),
                 "company": str(row['company']),
@@ -180,6 +176,40 @@ async def process_emails_metadata(
             detail=f"Internal server error occurred while processing your request. Please try again or contact support if the issue persists."
         )
 
+def validate_and_enhance_csv(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Validate CSV columns and add missing optional columns with defaults
+    
+    Required columns: name, company, linkedin_url
+    Optional columns: intelligence (defaults to False), template_type (defaults to None)
+    """
+    # Validate required columns
+    required_columns = ['name', 'company', 'linkedin_url']
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Missing required columns: {', '.join(missing_columns)}. Required: {', '.join(required_columns)}"
+        )
+    
+    # Add optional columns with defaults if missing
+    if 'intelligence' not in df.columns:
+        df['intelligence'] = False
+    else:
+        # Convert intelligence column to boolean, handling various formats
+        df['intelligence'] = df['intelligence'].astype(str).str.lower().isin(['true', '1', 'yes', 'y'])
+    
+    if 'template_type' not in df.columns:
+        df['template_type'] = ''  # Will use default template
+    else:
+        # Clean template_type values - handle NaN and empty strings
+        df['template_type'] = df['template_type'].fillna('')  # Replace NaN with empty string
+        df['template_type'] = df['template_type'].astype(str)  # Ensure string type
+        df['template_type'] = df['template_type'].replace('nan', '')  # Handle string 'nan'
+    
+    return df
+
+
 def render_email_template(template_str: str, name: str, company: str, linkedin_url: str) -> str:
     """Render an email template with provided data"""
     try:
@@ -192,9 +222,27 @@ def render_email_template(template_str: str, name: str, company: str, linkedin_u
     except Exception as e:
         return f"Error rendering template: {str(e)}"
 
-async def generate_single_email(row: pd.Series, template: Template) -> str:
-    """Generate a single personalized email using the template"""
+async def generate_single_email(row: pd.Series, fallback_template_type: Optional[TemplateType] = None) -> str:
+    """Generate a single personalized email using row-specific or fallback template"""
     try:
+        # Determine template type for this row
+        row_template_type = row.get('template_type')
+        
+        # Use row template if specified, otherwise use fallback
+        if row_template_type and row_template_type.strip():
+            try:
+                # Try to convert string to TemplateType enum
+                template_type = TemplateType(row_template_type.strip())
+            except (ValueError, AttributeError):
+                # Invalid template type, use fallback
+                template_type = fallback_template_type
+        else:
+            template_type = fallback_template_type
+        
+        # Get template content for this specific row
+        template_content = get_template_content(template_type)
+        template = Template(template_content)
+        
         # Convert row to dict for template rendering
         context = {
             'name': str(row.get('name', '')),
@@ -212,11 +260,12 @@ async def generate_single_email(row: pd.Series, template: Template) -> str:
 # TODO: asyncio.gather has some disadvantages like missing error handling and memory usage.
 # TODO: Consider using a different approach for batch processing. like using a asyncio.TaskGroup
 # to manage the tasks and handle errors.
-async def process_batch(batch_df: pd.DataFrame, template: Template) -> list[str]:
-    """Process a batch of rows in parallel"""
+async def process_batch(batch_df: pd.DataFrame, fallback_template_type: Optional[TemplateType] = None) -> list[str]:
+    """Process a batch of rows in parallel with per-row template selection"""
     # Generate emails for all rows in this batch concurrently
+    # Each row can have its own template_type or use the fallback
     batch_emails = await asyncio.gather(*[
-        generate_single_email(row, template)
+        generate_single_email(row, fallback_template_type)
         for _, row in batch_df.iterrows()
     ])
     return batch_emails
@@ -232,17 +281,29 @@ def create_batches(df: pd.DataFrame, batch_size: int) -> list[pd.DataFrame]:
 @app.post("/generate-emails")
 async def generate_emails(
     file: UploadFile = File(...),
-    template_type: Optional[TemplateType] = Form(None, description="Email template type. Uses sales_outreach if not provided.")
+    template_type: Optional[TemplateType] = Form(None, description="Fallback template type when CSV template_type column is empty. Uses sales_outreach if not provided.")
 ):
     """
     Generate personalized emails from CSV data using batch processing
     
-    - **file**: CSV file with columns: name, company, linkedin_url
-    - **template_type**: Email template type from available templates. Uses sales_outreach if not provided.
+    - **file**: CSV file with required columns: name, company, linkedin_url
+              Optional columns: intelligence (true/false), template_type (template name)
+    - **template_type**: Fallback email template type when template_type column is empty. Uses sales_outreach if not provided.
+    
+    **CSV Column Details:**
+    - **name** (required): Contact's name
+    - **company** (required): Contact's company name  
+    - **linkedin_url** (required): Contact's LinkedIn profile URL
+    - **intelligence** (optional): true/false - Use AI research and generation (not implemented in Phase 1)
+    - **template_type** (optional): Per-row template selection (overrides the fallback template_type parameter)
     
     Available template types: sales_outreach, recruitment, networking, partnership, follow_up, introduction, cold_email
     
-    Batch size is configured via BATCH_SIZE environment variable (default: 100).
+    **Processing Logic:**
+    - Each row can specify its own template_type for personalized template selection
+    - If template_type column is empty/missing, falls back to the template_type parameter
+    - Batch size is configured via BATCH_SIZE environment variable (default: 100)
+    - Intelligence column prepares for future AI-enhanced email generation
     
     Returns: CSV file with original data plus generated_email column
     """
@@ -251,9 +312,6 @@ async def generate_emails(
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="File must be a CSV")
     
-    # Get template content from repository
-    email_template = get_template_content(template_type)
-    
     # Read file contents
     contents = await file.read()
     
@@ -261,18 +319,12 @@ async def generate_emails(
         # Parse CSV data
         df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
         
-        # Validate required columns
-        required_columns = ['name', 'company', 'linkedin_url']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Missing required columns: {', '.join(missing_columns)}. Required: {', '.join(required_columns)}"
-            )
-        
         # Check if CSV has data
         if df.empty:
             raise HTTPException(status_code=400, detail="CSV file is empty")
+        
+        # Validate required columns and add optional columns with defaults
+        df = validate_and_enhance_csv(df)
         
         # Validate CSV size limits
         if len(df) > MAX_CSV_ROWS:
@@ -280,9 +332,6 @@ async def generate_emails(
                 status_code=400, 
                 detail=f"CSV too large. Maximum allowed rows: {MAX_CSV_ROWS}, received: {len(df)}"
             )
-        
-        # Create template object
-        jinja_template = Template(email_template)
         
         # Split DataFrame into batches for efficient processing
         batches = create_batches(df, BATCH_SIZE)
@@ -295,8 +344,8 @@ async def generate_emails(
         for batch_idx, batch_df in enumerate(batches, 1):
             print(f"Processing batch {batch_idx}/{total_batches} ({len(batch_df)} rows)")
             
-            # Process current batch in parallel
-            batch_emails = await process_batch(batch_df, jinja_template)
+            # Process current batch in parallel (each row can have its own template)
+            batch_emails = await process_batch(batch_df, template_type)
             all_generated_emails.extend(batch_emails)
         
         # Combine all generated emails
