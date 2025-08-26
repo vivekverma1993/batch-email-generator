@@ -6,6 +6,10 @@ import io
 import asyncio
 import os
 from fastapi.responses import StreamingResponse
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import template functionality
 from .templates import (
