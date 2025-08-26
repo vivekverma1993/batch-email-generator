@@ -4,17 +4,18 @@ Configurable CSV Test Data Generator for Batch Email Generator
 
 Generates CSV files with enhanced features including:
 - Basic columns: name, company, linkedin_url
-- Intelligence column: true/false for AI research (30% true)
+- Intelligence column: true/false for AI research (configurable percentage, default 30%)
 - Template_type column: random template selection from src/templates.py (20% empty for fallback testing)
 
 Usage:
-    python scripts/generate_test_data.py [number_of_entries] [output_filename] [--legacy]
+    python scripts/generate_test_data.py [number_of_entries] [output_filename] [--ai-percent N] [--legacy]
     
 Examples:
-    python scripts/generate_test_data.py 100                          # 100 entries -> uploads/test_data_100.csv (enhanced)
-    python scripts/generate_test_data.py 10000                        # 10000 entries -> uploads/test_data_10000.csv (enhanced)
-    python scripts/generate_test_data.py 5000 my_custom_data.csv       # 5000 entries -> uploads/my_custom_data.csv (enhanced)
-    python scripts/generate_test_data.py 1000 legacy_data.csv --legacy # 1000 entries -> uploads/legacy_data.csv (old format)
+    python scripts/generate_test_data.py 100                                    # 100 entries, 30% AI (default)
+    python scripts/generate_test_data.py 1000 --ai-percent 50                  # 1000 entries, 50% AI
+    python scripts/generate_test_data.py 5000 my_data.csv --ai-percent 10      # 5000 entries, 10% AI
+    python scripts/generate_test_data.py 2000 test.csv --ai-percent=75         # 2000 entries, 75% AI
+    python scripts/generate_test_data.py 1000 legacy_data.csv --legacy         # 1000 entries (old format)
 
 Enhanced CSV Format:
     name,company,linkedin_url,intelligence,template_type
@@ -151,13 +152,17 @@ def generate_linkedin_url(name):
     username = random.choice(variations)
     return f"https://linkedin.com/in/{username}"
 
-def generate_intelligence():
+def generate_intelligence(ai_percentage=30):
     """Generate a random boolean value for intelligence column
     
-    Returns 'true' or 'false' as strings (30% chance of 'true' for AI research)
+    Args:
+        ai_percentage: Percentage chance of returning 'true' (0-100)
+    
+    Returns 'true' or 'false' as strings
     """
-    # 30% chance of using AI intelligence, 70% traditional templates
-    return "true" if random.random() < 0.3 else "false"
+    # Convert percentage to probability (0.0 to 1.0)
+    probability = ai_percentage / 100.0
+    return "true" if random.random() < probability else "false"
 
 def generate_template_type():
     """Generate a random template type or empty string
@@ -170,9 +175,10 @@ def generate_template_type():
     
     return random.choice(TEMPLATE_TYPES)
 
-def generate_test_csv(filename, num_entries=1000):
+def generate_test_csv(filename, num_entries=1000, ai_percentage=30):
     """Generate a CSV file with fake test data including enhanced features"""
     print(f"Generating {num_entries:,} fake entries with enhanced features...")
+    print(f"AI Intelligence percentage: {ai_percentage}%")
     
     # Ensure uploads directory exists
     uploads_dir = Path("uploads")
@@ -195,7 +201,7 @@ def generate_test_csv(filename, num_entries=1000):
             name = generate_name()
             company = generate_company()
             linkedin_url = generate_linkedin_url(name)
-            intelligence = generate_intelligence()
+            intelligence = generate_intelligence(ai_percentage)
             template_type = generate_template_type()
             
             writer.writerow({
@@ -220,9 +226,9 @@ def generate_test_csv(filename, num_entries=1000):
     
     # Show statistics about generated data
     print("\nData Distribution:")
-    intelligence_true_count = sum(1 for _ in range(num_entries) if random.random() < 0.3)
+    intelligence_true_count = sum(1 for _ in range(num_entries) if random.random() < (ai_percentage / 100.0))
     template_empty_count = sum(1 for _ in range(num_entries) if random.random() < 0.2)
-    print(f"  AI Intelligence (approx): ~{intelligence_true_count:,} entries (~30%)")
+    print(f"  AI Intelligence (approx): ~{intelligence_true_count:,} entries (~{ai_percentage}%)")
     print(f"  Empty template_type (approx): ~{template_empty_count:,} entries (~20%)")
     print(f"  Available templates: {', '.join(TEMPLATE_TYPES)}")
     
@@ -279,13 +285,51 @@ def main():
     """Main function to handle command-line arguments"""
     # Default values
     default_entries = 1000
+    default_ai_percentage = 30
     legacy_mode = False
     
-    # Check for --legacy flag
+    # Parse command-line arguments
     args = sys.argv[1:]
+    ai_percentage = default_ai_percentage
+    
+    # Check for --legacy flag
     if '--legacy' in args:
         legacy_mode = True
         args.remove('--legacy')
+    
+    # Check for --ai-percent flag
+    ai_percent_index = None
+    for i, arg in enumerate(args):
+        if arg.startswith('--ai-percent'):
+            if '=' in arg:
+                # Format: --ai-percent=50
+                try:
+                    ai_percentage = int(arg.split('=')[1])
+                    args.remove(arg)
+                except (ValueError, IndexError):
+                    print("Error: --ai-percent must be followed by a valid integer (0-100)")
+                    print_usage()
+                    sys.exit(1)
+            else:
+                # Format: --ai-percent 50
+                ai_percent_index = i
+                break
+    
+    if ai_percent_index is not None:
+        try:
+            ai_percentage = int(args[ai_percent_index + 1])
+            # Remove both the flag and its value
+            args.pop(ai_percent_index + 1)  # Remove value first (higher index)
+            args.pop(ai_percent_index)      # Then remove flag
+        except (IndexError, ValueError):
+            print("Error: --ai-percent must be followed by a valid integer (0-100)")
+            print_usage()
+            sys.exit(1)
+    
+    # Validate AI percentage
+    if not 0 <= ai_percentage <= 100:
+        print("Error: AI percentage must be between 0 and 100")
+        sys.exit(1)
     
     # Parse remaining command-line arguments
     if len(args) == 0:
@@ -336,7 +380,7 @@ def main():
     if legacy_mode:
         generated_file = generate_legacy_csv(filename, num_entries)
     else:
-        generated_file = generate_test_csv(filename, num_entries)
+        generated_file = generate_test_csv(filename, num_entries, ai_percentage)
     
     # Show recommended batch sizes for testing
     print("\nRecommended Batch Sizes for Testing:")
@@ -347,18 +391,21 @@ def main():
 def print_usage():
     """Print usage information"""
     print("""
-Usage: python scripts/generate_test_data.py [number_of_entries] [output_filename] [--legacy]
+Usage: python scripts/generate_test_data.py [number_of_entries] [output_filename] [--ai-percent N] [--legacy]
 
 Arguments:
     number_of_entries    Number of CSV entries to generate (default: 1000)
     output_filename      Output filename (default: test_data_[number].csv)
+    --ai-percent N       Percentage of AI intelligence rows (0-100, default: 30)
     --legacy            Generate legacy format CSV (name,company,linkedin_url only)
 
 Examples:
-    python scripts/generate_test_data.py
-    python scripts/generate_test_data.py 500
-    python scripts/generate_test_data.py 5000 custom_data.csv
-    python scripts/generate_test_data.py 1000 legacy_test.csv --legacy
+    python scripts/generate_test_data.py                               # 1000 entries, 30% AI
+    python scripts/generate_test_data.py 500                          # 500 entries, 30% AI
+    python scripts/generate_test_data.py 2000 --ai-percent 50         # 2000 entries, 50% AI
+    python scripts/generate_test_data.py 1000 test.csv --ai-percent=10 # 1000 entries, 10% AI
+    python scripts/generate_test_data.py 5000 custom_data.csv         # 5000 entries, 30% AI
+    python scripts/generate_test_data.py 1000 legacy_test.csv --legacy # 1000 entries (old format)
 
 Enhanced format (default):
     name,company,linkedin_url,intelligence,template_type
