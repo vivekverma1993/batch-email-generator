@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+
+# Virtual environments
+.env
+.venv/
+venv/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# IDE and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+.directory
+
+# Project specific - CSV files and outputs
+sample_*.csv
+test_*.csv
+generated_*.csv
+output_*.csv
+uploads/
+temp/
+
+# Logs
+*.log
+
+# Environment configuration
+.env.local
+.env.production
