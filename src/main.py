@@ -209,6 +209,9 @@ async def generate_single_email(row: pd.Series, template: Template) -> str:
     except Exception as e:
         return f"Error generating email: {str(e)}"
 
+# TODO: asyncio.gather has some disadvantages like missing error handling and memory usage.
+# TODO: Consider using a different approach for batch processing. like using a asyncio.TaskGroup
+# to manage the tasks and handle errors.
 async def process_batch(batch_df: pd.DataFrame, template: Template) -> list[str]:
     """Process a batch of rows in parallel"""
     # Generate emails for all rows in this batch concurrently
