@@ -39,7 +39,6 @@ I work with companies similar to {{company}} to help them streamline their proce
 
 Would you be open to a 15-minute call this week? I'd love to share some specific examples relevant to {{company}}'s industry.
 
-You can view my background here: {{linkedin_url}}
 
 Best regards,
 Vivek Verma
@@ -61,7 +60,6 @@ We're currently looking for talented professionals to join our growing team, and
 
 Would you be interested in a brief conversation about potential opportunities? I can share more details about the roles and how they might align with your career goals.
 
-Feel free to check out more about our company culture: {{linkedin_url}}
 
 Best regards,
 Vivek Verma
@@ -84,7 +82,6 @@ I'm always interested in connecting with talented professionals in our industry.
 
 Would you be open to connecting? I'd love to learn more about your work and share some insights from my own experience.
 
-Looking forward to potentially connecting: {{linkedin_url}}
 
 Best regards,
 Vivek Verma
@@ -106,7 +103,6 @@ I believe there might be some interesting synergies between our organizations. W
 
 I'd love to explore potential collaboration opportunities. Would you be interested in a brief conversation to discuss how our companies might work together?
 
-You can learn more about our approach here: {{linkedin_url}}
 
 Best regards,
 Vivek Verma
@@ -129,7 +125,6 @@ I've been thinking about the points you raised, and I believe we can address the
 
 Would you have time for a brief follow-up call this week? I can provide more concrete examples of how we've helped companies similar to {{company}}.
 
-As promised, here's my LinkedIn profile for reference: {{linkedin_url}}
 
 Best regards,
 Vivek Verma
@@ -153,7 +148,6 @@ I'd love to learn more about your current initiatives and see if there's a way I
 
 Would you be open to a brief introductory conversation? I promise to keep it concise and valuable.
 
-Feel free to connect with me here: {{linkedin_url}}
 
 Best regards,
 Vivek Verma
@@ -179,8 +173,7 @@ No worries if the timing isn't right - I understand how busy things can get.
 
 Best regards,
 Vivek Verma
-
-P.S. Feel free to check out my background: {{linkedin_url}}"""
+"""
     }
 }
 
