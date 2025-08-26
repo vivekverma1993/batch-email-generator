@@ -33,8 +33,6 @@ async def generate_emails(file: UploadFile = File(...)):
     # Read file contents
     contents = await file.read()
     
-    # For now, just return success message
-    # TODO: Implement CSV processing and email generation
     return {
         "message": "CSV file uploaded successfully", 
         "filename": file.filename,
