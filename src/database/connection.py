@@ -226,8 +226,8 @@ def init_database(drop_first: bool = False) -> tuple[bool, Optional[str]]:
                         r.status,
                         r.created_at,
                         r.total_processing_time_seconds,
-                        r.successful_emails,
-                        r.failed_emails,
+                        COUNT(CASE WHEN e.status = 'completed' THEN 1 END) as successful_emails,
+                        COUNT(CASE WHEN e.status = 'failed' THEN 1 END) as failed_emails,
                         r.total_llm_tokens_used,
                         r.estimated_cost_usd,
                         COUNT(e.id) as total_generated_emails,
@@ -239,7 +239,6 @@ def init_database(drop_first: bool = False) -> tuple[bool, Optional[str]]:
                     GROUP BY r.id, r.request_id, r.original_filename, r.total_rows, 
                              r.template_llm_rows, r.ai_research_rows, r.status, 
                              r.created_at, r.total_processing_time_seconds,
-                             r.successful_emails, r.failed_emails, 
                              r.total_llm_tokens_used, r.estimated_cost_usd;
                 """))
                 

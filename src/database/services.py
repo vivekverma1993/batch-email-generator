@@ -89,6 +89,28 @@ class EmailRequestService:
             return False
     
     @staticmethod
+    def update_request_status(request_id: str, status: str, processing_time: float = None) -> bool:
+        """Update request status"""
+        db_manager = get_database_manager()
+        
+        try:
+            with db_manager.session_scope() as session:
+                request = session.query(EmailRequest).filter_by(request_id=request_id).first()
+                if not request:
+                    return False
+                
+                request.status = status
+                if processing_time is not None:
+                    request.total_processing_time_seconds = processing_time
+                if status in ['completed', 'failed', 'partial']:
+                    request.processing_completed_at = datetime.utcnow()
+                
+                return True
+        except Exception as e:
+            logger.error(f"Failed to update request status: {e}")
+            return False
+
+    @staticmethod
     def get_request(request_id: str) -> Optional[EmailRequest]:
         """Get request by ID"""
         db_manager = get_database_manager()
@@ -185,6 +207,43 @@ class GeneratedEmailService:
             return False
     
     @staticmethod
+    def update_generated_email(
+        placeholder_uuid: str,
+        generated_email: str,
+        processing_time_seconds: float,
+        cost_usd: float,
+        llm_model: str = "gpt-4o-mini",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        error_message: Optional[str] = None
+    ) -> bool:
+        """Update email by placeholder UUID with generated content"""
+        db_manager = get_database_manager()
+        
+        try:
+            with db_manager.session_scope() as session:
+                email = session.query(GeneratedEmail).filter_by(placeholder_uuid=placeholder_uuid).first()
+                if not email:
+                    logger.error(f"Email with UUID {placeholder_uuid} not found")
+                    return False
+                
+                email.generated_email = generated_email
+                email.llm_model_used = llm_model
+                email.prompt_tokens = prompt_tokens
+                email.completion_tokens = completion_tokens
+                email.total_tokens = prompt_tokens + completion_tokens
+                email.processing_time_seconds = processing_time_seconds
+                email.cost_usd = cost_usd
+                email.error_message = error_message
+                email.status = 'completed' if generated_email and not error_message else 'failed'
+                email.processing_completed_at = datetime.utcnow()
+                
+                return True
+        except Exception as e:
+            logger.error(f"Failed to update email by UUID: {e}")
+            return False
+
+    @staticmethod
     def get_emails_for_request(request_id: str) -> List[GeneratedEmail]:
         """Get all emails for a request"""
         db_manager = get_database_manager()
@@ -279,6 +338,88 @@ class GeneratedEmailService:
         except Exception as e:
             logger.error(f"Error in bulk_create_email_placeholders: {e}")
             raise
+    
+    @staticmethod
+    def get_completed_emails_since_count(request_id: str, since_count: int) -> List:
+        """
+        Get completed emails after a certain count (for SSE streaming)
+        
+        Args:
+            request_id: The request ID
+            since_count: Get emails after this count (0-based)
+            
+        Returns:
+            List of newly completed emails
+        """
+        db_manager = get_database_manager()
+        
+        with db_manager.session_scope() as session:
+            # Get completed emails, ordered by completion time, skip the first 'since_count'
+            return session.query(GeneratedEmail)\
+                         .filter_by(request_id=request_id, status='completed')\
+                         .order_by(GeneratedEmail.processing_completed_at)\
+                         .offset(since_count)\
+                         .all()
+    
+    @staticmethod
+    def get_failed_emails_since_count(request_id: str, since_count: int) -> List:
+        """
+        Get failed emails after a certain count (for SSE streaming)
+        
+        Args:
+            request_id: The request ID
+            since_count: Get emails after this count (0-based)
+            
+        Returns:
+            List of newly failed emails
+        """
+        db_manager = get_database_manager()
+        
+        with db_manager.session_scope() as session:
+            # Get failed emails, ordered by processing time, skip the first 'since_count'
+            return session.query(GeneratedEmail)\
+                         .filter_by(request_id=request_id, status='failed')\
+                         .order_by(GeneratedEmail.processing_completed_at)\
+                         .offset(since_count)\
+                         .all()
+    
+    @staticmethod
+    def get_email_counts_for_request(request_id: str) -> Dict[str, int]:
+        """
+        Get current email counts for a request (for SSE progress tracking)
+        
+        Args:
+            request_id: The request ID
+            
+        Returns:
+            Dictionary with current counts
+        """
+        db_manager = get_database_manager()
+        
+        with db_manager.session_scope() as session:
+            total_count = session.query(GeneratedEmail)\
+                                .filter_by(request_id=request_id)\
+                                .count()
+            
+            completed_count = session.query(GeneratedEmail)\
+                                   .filter_by(request_id=request_id, status='completed')\
+                                   .count()
+            
+            failed_count = session.query(GeneratedEmail)\
+                                 .filter_by(request_id=request_id, status='failed')\
+                                 .count()
+            
+            processing_count = session.query(GeneratedEmail)\
+                                    .filter_by(request_id=request_id, status='processing')\
+                                    .count()
+            
+            return {
+                'total': total_count,
+                'completed': completed_count,
+                'failed': failed_count,
+                'processing': processing_count,
+                'pending': total_count - completed_count - failed_count - processing_count
+            }
 
 
 class ProcessingBatchService:

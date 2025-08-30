@@ -17,9 +17,8 @@ from .database.services import (
     EmailRequestService, GeneratedEmailService, ProcessingBatchService,
     ProcessingErrorService, SystemMetricService, AnalyticsService
 )
-
-from .templates import TemplateType
 from .email_generator import process_ai_dataframe, process_template_dataframe
+from .templates import TemplateType
 
 
 def log_ai_results_to_json(request_id: str, ai_results: dict, original_ai_rows: pd.DataFrame, processing_time: float, ai_uuid_mapping: Optional[dict] = None):
@@ -182,13 +181,13 @@ async def process_all_emails_background(
         
         # Add AI processing task if there are AI rows
         if not ai_rows.empty:
-            ai_task = process_ai_dataframe(ai_rows, fallback_template_type)
+            ai_task = process_ai_dataframe(ai_rows, fallback_template_type, request_id, all_rows, uuid_mapping)
             tasks.append(ai_task)
             task_types.append("ai")
         
         # Add template processing task if there are template rows
         if not template_rows.empty:
-            template_task = process_template_dataframe(template_rows, fallback_template_type)
+            template_task = process_template_dataframe(template_rows, fallback_template_type, request_id, all_rows, uuid_mapping)
             tasks.append(template_task)
             task_types.append("template")
         
@@ -213,8 +212,12 @@ async def process_all_emails_background(
         processing_time = time.time() - start_time
         print(f"Unified background processing completed for request {request_id} in {processing_time:.2f}s")
         
-        # Save results to database
-        log_unified_results_to_database(request_id, combined_results, all_rows, processing_time, uuid_mapping)
+        # Results already saved incrementally during batch processing - just update request status
+        try:
+            EmailRequestService.update_request_status(request_id, 'completed', processing_time)
+            print(f"✓ Updated request {request_id} status to completed")
+        except Exception as e:
+            print(f"✗ Failed to update request status: {str(e)}")
         
     except Exception as e:
         print(f"Unified background processing failed for request {request_id}: {str(e)}")

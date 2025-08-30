@@ -15,11 +15,52 @@ from .templates import TemplateType, get_template_content
 from .linkedin_research import research_linkedin_profile
 from .ai_generator import generate_ai_email, generate_ai_email_from_template
 from .utils import create_batches
+from .database.services import GeneratedEmailService
 
 
 # Configuration
 INTELLIGENCE_BATCH_SIZE = int(os.getenv("INTELLIGENCE_BATCH_SIZE", "5"))
 AI_FALLBACK_TO_TEMPLATE = os.getenv("AI_FALLBACK_TO_TEMPLATE", "true").lower() == "true"
+
+
+def save_batch_to_database(request_id: str, batch_results: dict, original_df: pd.DataFrame, uuid_mapping: dict = None):
+    """
+    Save a batch of email results to the database immediately
+    
+    Args:
+        request_id: The request ID
+        batch_results: Dictionary of {row_index: email_content} for this batch
+        original_df: Original dataframe to get row data
+        uuid_mapping: Optional mapping of row indices to UUIDs
+    """
+    try:
+        for row_idx, email_content in batch_results.items():
+            if row_idx >= len(original_df):
+                continue
+                
+            row = original_df.iloc[row_idx]
+            placeholder_uuid = uuid_mapping.get(row_idx) if uuid_mapping else None
+            
+            if not placeholder_uuid:
+                print(f"Warning: No UUID mapping for row {row_idx}, skipping database save")
+                continue
+            
+            # Update the email in database
+            success = GeneratedEmailService.update_generated_email(
+                placeholder_uuid=str(placeholder_uuid),
+                generated_email=email_content,
+                processing_time_seconds=0.8,  # Approximate time per email
+                cost_usd=0.002  # Approximate cost per email
+            )
+            
+            if success:
+                print(f"✓ Saved email for {row.get('name', 'Unknown')} to database")
+            else:
+                print(f"✗ Failed to save email for row {row_idx} to database")
+                
+    except Exception as e:
+        print(f"Error saving batch to database: {str(e)}")
+        # Don't raise - processing should continue even if database save fails
 
 
 def render_email_template(template_str: str, name: str, company: str, linkedin_url: str) -> str:
@@ -222,13 +263,16 @@ async def generate_static_template_email(row: pd.Series, fallback_template_type:
         return f"Error generating static template email: {str(e)}"
 
 
-async def process_ai_dataframe(ai_df: pd.DataFrame, fallback_template_type: Optional[TemplateType] = None) -> dict:
+async def process_ai_dataframe(ai_df: pd.DataFrame, fallback_template_type: Optional[TemplateType] = None, request_id: str = None, original_df: pd.DataFrame = None, uuid_mapping: dict = None) -> dict:
     """
     Process AI DataFrame with smaller batches and rate limiting
     
     Args:
         ai_df: DataFrame containing rows that need AI processing
         fallback_template_type: Template type to use when row template_type is empty
+        request_id: Request ID for database saves
+        original_df: Original dataframe for database operations
+        uuid_mapping: Mapping of row indices to UUIDs for database updates
         
     Returns:
         Dictionary mapping row indices to generated email content
@@ -257,8 +301,14 @@ async def process_ai_dataframe(ai_df: pd.DataFrame, fallback_template_type: Opti
         batch_results = await asyncio.gather(*[task for _, task in batch_tasks])
         
         # Store results with original index
+        batch_dict = {}
         for (original_idx, _), result in zip(batch_tasks, batch_results):
             results[original_idx] = result
+            batch_dict[original_idx] = result
+        
+        # Save this batch to database immediately for real-time SSE streaming
+        if request_id and original_df is not None and uuid_mapping:
+            save_batch_to_database(request_id, batch_dict, original_df, uuid_mapping)
         
         batch_time = time.time() - batch_start
         print(f"    AI batch {batch_idx}/{len(ai_batches)} completed in {batch_time:.2f}s")
@@ -273,13 +323,16 @@ async def process_ai_dataframe(ai_df: pd.DataFrame, fallback_template_type: Opti
     return results
 
 
-async def process_template_dataframe(template_df: pd.DataFrame, fallback_template_type: Optional[TemplateType] = None) -> dict:
+async def process_template_dataframe(template_df: pd.DataFrame, fallback_template_type: Optional[TemplateType] = None, request_id: str = None, original_df: pd.DataFrame = None, uuid_mapping: dict = None) -> dict:
     """
     Process template DataFrame with LLM calls (now requires batching due to API latency)
     
     Args:
         template_df: DataFrame containing rows that need template LLM processing
         fallback_template_type: Template type to use when row template_type is empty
+        request_id: Request ID for database saves
+        original_df: Original dataframe for database operations
+        uuid_mapping: Mapping of row indices to UUIDs for database updates
         
     Returns:
         Dictionary mapping row indices to generated email content
@@ -309,8 +362,14 @@ async def process_template_dataframe(template_df: pd.DataFrame, fallback_templat
         batch_results = await asyncio.gather(*[task for _, task in batch_tasks])
         
         # Store results with original index
+        batch_dict = {}
         for (original_idx, _), result in zip(batch_tasks, batch_results):
             results[original_idx] = result
+            batch_dict[original_idx] = result
+        
+        # Save this batch to database immediately for real-time SSE streaming
+        if request_id and original_df is not None and uuid_mapping:
+            save_batch_to_database(request_id, batch_dict, original_df, uuid_mapping)
         
         batch_time = time.time() - batch_start
         print(f"    Template LLM batch {batch_idx}/{len(template_batches)} completed in {batch_time:.2f}s")

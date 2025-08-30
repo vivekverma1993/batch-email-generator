@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""
+Simple HTTP Server for Email Generator Test Page
+
+This script serves the sse_test.html file on a local HTTP server
+to avoid CORS issues when opening the file directly in a browser.
+
+Usage:
+    python serve_test_page.py
+
+Then open: http://localhost:3000
+"""
+
+import http.server
+import socketserver
+import webbrowser
+import os
+from pathlib import Path
+
+# Configuration
+PORT = 3000
+HOST = 'localhost'
+
+class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    """Custom handler to serve the test page and handle CORS"""
+    
+    def end_headers(self):
+        # Add CORS headers
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', '*')
+        super().end_headers()
+    
+    def do_GET(self):
+        """Handle GET requests"""
+        if self.path == '/' or self.path == '':
+            # Serve the test page as the root
+            self.path = '/sse_test.html'
+        
+        return super().do_GET()
+    
+    def do_OPTIONS(self):
+        """Handle OPTIONS requests for CORS preflight"""
+        self.send_response(200)
+        self.end_headers()
+
+def main():
+    """Start the HTTP server"""
+    
+    # Change to the project root directory
+    project_root = Path(__file__).parent
+    os.chdir(project_root)
+    
+    # Check if the test file exists
+    test_file = project_root / 'sse_test.html'
+    if not test_file.exists():
+        print(f"Error: sse_test.html not found in {project_root}")
+        print("Make sure you're running this script from the project root directory.")
+        return
+    
+    # Create the server
+    try:
+        with socketserver.TCPServer((HOST, PORT), CustomHTTPRequestHandler) as httpd:
+            print("Email Generator Test Page Server")
+            print("=" * 50)
+            print(f"📡 Server running at: http://{HOST}:{PORT}")
+            print(f"📁 Serving from: {project_root}")
+            print(f"🌐 Test page URL: http://{HOST}:{PORT}")
+            print()
+            print("📋 Instructions:")
+            print("1. Make sure your FastAPI server is running on http://localhost:8000")
+            print("2. Open http://localhost:3000 in your browser")
+            print("3. Upload a CSV file and watch real-time email generation!")
+            print()
+            print("Press Ctrl+C to stop the server")
+            print("=" * 50)
+            
+            # Optionally open browser automatically
+            try:
+                webbrowser.open(f'http://{HOST}:{PORT}')
+                print(f"Opened browser to http://{HOST}:{PORT}")
+            except Exception:
+                print("Could not auto-open browser. Please open manually.")
+            
+            # Start serving
+            httpd.serve_forever()
+            
+    except OSError as e:
+        if e.errno == 48:  # Address already in use
+            print(f"Error: Port {PORT} is already in use.")
+            print("Try stopping other servers or choose a different port.")
+        else:
+            print(f"Error starting server: {e}")
+    except KeyboardInterrupt:
+        print("\n🛑 Server stopped by user")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+
+if __name__ == "__main__":
+    main()

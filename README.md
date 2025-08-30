@@ -251,7 +251,7 @@ The system includes 7 professional email templates optimized for different use c
 - **Quality**: Highly personalized using fake LinkedIn research + AI generation
 - **Best for**: High-value prospects, personalized outreach, maximum engagement
 
-### 🚀 Hybrid Mode (Mix in single CSV)
+### Hybrid Mode (Mix in single CSV)
 - **Speed**: Immediate templates + background AI
 - **Cost**: Only pay for AI emails
 - **Quality**: Best of both worlds

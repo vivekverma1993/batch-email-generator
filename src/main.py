@@ -1,9 +1,11 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
-from typing import Optional
+from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional, AsyncGenerator
 import pandas as pd
 import io
 import asyncio
 import os
+import json
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 
@@ -37,7 +39,7 @@ from .background_processor import (
     process_all_emails_background
 )
 # Database imports
-from .database.services import EmailRequestService, GeneratedEmailService
+from .database.services import EmailRequestService, GeneratedEmailService, AnalyticsService
 from .database.connection import get_database_manager
 
 
@@ -222,6 +224,15 @@ app = FastAPI(
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
+)
+
+# Add CORS middleware to handle cross-origin requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 
@@ -550,6 +561,175 @@ async def generate_emails(
         )
 
 
+@app.post("/upload-and-process")
+async def upload_and_process(
+    file: UploadFile = File(...),
+    template_type: Optional[TemplateType] = Form(None, description="Fallback template type when CSV template_type column is empty. Uses sales_outreach if not provided.")
+):
+    """
+    Upload CSV and start processing with immediate JSON response (Frontend-friendly)
+    
+    This endpoint is optimized for modern frontend applications:
+    - Uploads CSV and validates it
+    - Creates database records and starts background processing
+    - Returns JSON with request_id for immediate SSE connection
+    - No CSV download - use /requests/{request_id}/download for that
+    
+    Perfect for:
+    - React/Vue/Angular applications
+    - Real-time progress tracking with SSE
+    - Modern UX patterns
+    
+    Returns: JSON with request_id, processing info, and SSE connection details
+    """
+    
+    # Validate file type
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="File must be a CSV")
+    
+    # Read file contents
+    contents = await file.read()
+    
+    try:
+        # Parse CSV data
+        df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
+        
+        # Validate CSV content and structure
+        validate_csv_not_empty(df)
+        df = validate_and_enhance_csv(df)
+        validate_csv_size(df, MAX_CSV_ROWS)
+        
+        # Split processing types
+        ai_rows, template_rows = split_dataframe_by_intelligence(df)
+        
+        # Generate unique request ID for tracking
+        request_id = generate_request_id()
+        
+        print(f"Request {request_id}: Processing {len(df)} rows via frontend upload")
+        print(f"   Template LLM emails: {len(template_rows)} (background)")
+        print(f"   AI research emails: {len(ai_rows)} (background)")
+        
+        # Create database records and placeholders
+        all_placeholders, all_uuid_mapping = create_database_records_and_placeholders(
+            request_id=request_id,
+            original_filename=file.filename,
+            df=df,
+            template_rows=template_rows,
+            ai_rows=ai_rows,
+            file_size_bytes=len(contents),
+            template_type=template_type
+        )
+        
+        # Start unified background processing for ALL emails
+        print(f"Starting unified background LLM processing for request {request_id}")
+        asyncio.create_task(
+            process_all_emails_background(request_id, df, template_type, all_uuid_mapping)
+        )
+        
+        # Return JSON response with all necessary info for frontend
+        return {
+            "success": True,
+            "message": "CSV uploaded and processing started successfully",
+            "request_id": request_id,
+            "processing_info": {
+                "total_emails": len(df),
+                "template_llm_emails": len(template_rows),
+                "ai_research_emails": len(ai_rows),
+                "processing_method": "unified-llm-background",
+                "estimated_processing_time_minutes": round((len(df) * 4) / 60, 1),
+                "status": "processing"
+            },
+            "file_info": {
+                "original_filename": file.filename,
+                "size_bytes": len(contents),
+                "size_mb": round(len(contents) / (1024 * 1024), 2),
+                "total_rows": len(df)
+            },
+            "streaming": {
+                "sse_endpoint": f"/stream/requests/{request_id}",
+                "progress_endpoint": f"/requests/{request_id}",
+                "emails_endpoint": f"/requests/{request_id}/emails",
+                "download_endpoint": f"/requests/{request_id}/download"
+            },
+            "template_info": get_template_info(template_type),
+            "next_steps": [
+                "Connect to the SSE endpoint to receive real-time updates",
+                "Processing will complete in background - no further action needed",
+                "Download final results using the download endpoint when processing completes"
+            ]
+        }
+        
+    except pd.errors.EmptyDataError:
+        raise HTTPException(status_code=400, detail="CSV file is empty or invalid")
+    except pd.errors.ParserError:
+        raise HTTPException(status_code=400, detail="Invalid CSV format")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File encoding not supported. Please use UTF-8 encoded CSV")
+    except Exception as e:
+        # Log the full error for debugging while returning safe message to user
+        print(f"Unexpected error in upload_and_process: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Internal server error occurred while processing your request. Please try again or contact support if the issue persists."
+        )
+
+
+@app.get("/requests/{request_id}/download")
+async def download_csv_with_placeholders(request_id: str):
+    """
+    Download CSV file with UUID placeholders for a specific request
+    
+    This endpoint allows downloading the CSV file with placeholders after upload.
+    Useful for users who want to save the placeholder file or for backwards compatibility.
+    """
+    try:
+        # Get request info
+        request = EmailRequestService.get_request(request_id)
+        if not request:
+            raise HTTPException(status_code=404, detail="Request not found")
+        
+        # Get all emails for this request
+        emails = GeneratedEmailService.get_emails_by_request_id(request_id)
+        if not emails:
+            raise HTTPException(status_code=404, detail="No emails found for this request")
+        
+        # Create DataFrame from database records
+        email_data = []
+        for email in emails:
+            email_data.append({
+                'name': email.name,
+                'company': email.company,
+                'linkedin_url': email.linkedin_url,
+                'intelligence': email.intelligence_used,
+                'template_type': email.template_type,
+                'generated_email': email.generated_email if email.status == 'completed' else f"PROCESSING:{email.placeholder_uuid}"
+            })
+        
+        df = pd.DataFrame(email_data)
+        
+        # Convert to CSV
+        output = io.StringIO()
+        df.to_csv(output, index=False)
+        csv_content = output.getvalue()
+        
+        # Create streaming response
+        def iter_csv():
+            yield csv_content
+        
+        return StreamingResponse(
+            iter_csv(),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f"attachment; filename=generated_{request['original_filename']}",
+                "X-Request-ID": request_id,
+                "Cache-Control": "no-cache, no-store, must-revalidate"
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating download: {str(e)}")
+
+
 # Database Query Endpoints
 
 @app.get("/requests/{request_id}")
@@ -665,6 +845,216 @@ async def get_performance_analytics(days: int = 7):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving analytics: {str(e)}")
+
+
+@app.get("/stream/requests/{request_id}")
+async def stream_request_progress(request_id: str):
+    """
+    Stream real-time updates for email processing using Server-Sent Events (SSE)
+    
+    This endpoint provides real-time streaming of email processing progress:
+    - Connection establishment confirmation
+    - Individual email completions with full content
+    - Progress updates with completion percentages
+    - Final processing completion notification
+    - Error handling and status updates
+    
+    Frontend Usage:
+    ```javascript
+    const eventSource = new EventSource(`/stream/requests/${requestId}`);
+    
+    eventSource.addEventListener('email_completed', (event) => {
+        const email = JSON.parse(event.data);
+        console.log('New email:', email);
+    });
+    
+    eventSource.addEventListener('progress_update', (event) => {
+        const progress = JSON.parse(event.data);
+        updateProgressBar(progress.percentage);
+    });
+    ```
+    
+    Returns: Server-Sent Events stream with real-time processing updates
+    """
+    
+    async def event_stream() -> AsyncGenerator[str, None]:
+        try:
+            # Check if request exists
+            request = EmailRequestService.get_request(request_id)
+            if not request:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Request not found'})}\n\n"
+                return
+            
+            # Send initial connection confirmation
+            initial_data = {
+                'type': 'connection_established',
+                'request_id': request_id,
+                'timestamp': pd.Timestamp.now().isoformat(),
+                'message': 'SSE connection established successfully'
+            }
+            yield f"data: {json.dumps(initial_data)}\n\n"
+            
+            # Track progress to detect changes
+            last_completed_count = 0
+            last_failed_count = 0
+            processing_complete = False
+            
+            while not processing_complete:
+                try:
+                    # Get current request status
+                    current_request = EmailRequestService.get_request(request_id)
+                    if not current_request:
+                        break
+                    
+                    # Get email counts directly from database (bypassing broken analytics)
+                    email_counts = GeneratedEmailService.get_email_counts_for_request(request_id)
+                    if not email_counts:
+                        await asyncio.sleep(1)
+                        continue
+                    
+                    current_completed = email_counts.get('completed', 0)
+                    current_failed = email_counts.get('failed', 0)
+                    total_emails = email_counts.get('total', 0)
+                    
+                    # Check for newly completed emails
+                    if current_completed > last_completed_count:
+                        # Get the newly completed emails
+                        new_emails = GeneratedEmailService.get_completed_emails_since_count(
+                            request_id, last_completed_count
+                        )
+                        
+                        # Send each completed email as separate event
+                        for email in new_emails:
+                            email_data = {
+                                'type': 'email_completed',
+                                'request_id': request_id,
+                                'timestamp': pd.Timestamp.now().isoformat(),
+                                'data': {
+                                    'email_uuid': str(email.placeholder_uuid),
+                                    'name': email.name,
+                                    'company': email.company,
+                                    'linkedin_url': email.linkedin_url,
+                                    'generated_email': email.generated_email,
+                                    'processing_time_seconds': float(email.processing_time_seconds) if email.processing_time_seconds else None,
+                                    'template_type': email.template_type,
+                                    'intelligence_used': email.intelligence_used,
+                                    'cost_usd': float(email.cost_usd) if email.cost_usd else None
+                                }
+                            }
+                            yield f"event: email_completed\ndata: {json.dumps(email_data)}\n\n"
+                        
+                        last_completed_count = current_completed
+                    
+                    # Check for newly failed emails
+                    if current_failed > last_failed_count:
+                        # Get failed emails (simplified version)
+                        failed_emails = GeneratedEmailService.get_failed_emails_since_count(
+                            request_id, last_failed_count
+                        )
+                        
+                        for failed_email in failed_emails:
+                            error_data = {
+                                'type': 'email_failed',
+                                'request_id': request_id,
+                                'timestamp': pd.Timestamp.now().isoformat(),
+                                'data': {
+                                    'email_uuid': str(failed_email.placeholder_uuid),
+                                    'name': failed_email.name,
+                                    'company': failed_email.company,
+                                    'error_message': failed_email.error_message,
+                                    'template_type': failed_email.template_type
+                                }
+                            }
+                            yield f"event: email_failed\ndata: {json.dumps(error_data)}\n\n"
+                        
+                        last_failed_count = current_failed
+                    
+                    # Send progress update if there were changes
+                    if current_completed > 0 or current_failed > 0:
+                        progress_percentage = round(((current_completed + current_failed) / total_emails) * 100, 1) if total_emails > 0 else 0
+                        
+                        progress_data = {
+                            'type': 'progress_update',
+                            'request_id': request_id,
+                            'timestamp': pd.Timestamp.now().isoformat(),
+                            'data': {
+                                'completed_emails': current_completed,
+                                'failed_emails': current_failed,
+                                'total_emails': total_emails,
+                                'percentage': progress_percentage,
+                                'status': current_request.status,
+                                'processing_time_seconds': current_request.total_processing_time_seconds or 0
+                            }
+                        }
+                        yield f"event: progress_update\ndata: {json.dumps(progress_data)}\n\n"
+                    
+                    # Check if processing is complete
+                    if current_request.status in ['completed', 'failed', 'partial']:
+                        processing_complete = True
+                        
+                        final_data = {
+                            'type': 'processing_complete',
+                            'request_id': request_id,
+                            'timestamp': pd.Timestamp.now().isoformat(),
+                            'data': {
+                                'final_status': current_request.status,
+                                'total_emails': total_emails,
+                                'successful_emails': current_completed,
+                                'failed_emails': current_failed,
+                                'total_processing_time_seconds': current_request.total_processing_time_seconds or 0,
+                                'estimated_cost_usd': current_request.estimated_cost_usd or 0,
+                                'completion_message': f"Processing completed: {current_completed}/{total_emails} emails generated successfully"
+                            }
+                        }
+                        yield f"event: processing_complete\ndata: {json.dumps(final_data)}\n\n"
+                        
+                        # Send explicit close signal and wait for frontend to process
+                        close_data = {
+                            'type': 'connection_closing',
+                            'request_id': request_id,
+                            'timestamp': pd.Timestamp.now().isoformat(),
+                            'message': 'Server closing SSE connection - processing complete'
+                        }
+                        yield f"event: connection_closing\ndata: {json.dumps(close_data)}\n\n"
+                        
+                        # Extended buffer to ensure frontend receives both messages
+                        await asyncio.sleep(3)
+                        break
+                    
+                    # Wait before next check (1 second intervals)
+                    await asyncio.sleep(1)
+                    
+                except Exception as inner_e:
+                    error_data = {
+                        'type': 'error',
+                        'request_id': request_id,
+                        'timestamp': pd.Timestamp.now().isoformat(),
+                        'message': f'Error during processing: {str(inner_e)}'
+                    }
+                    yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
+                    await asyncio.sleep(2)  # Wait longer on errors
+                    
+        except Exception as e:
+            final_error_data = {
+                'type': 'fatal_error',
+                'request_id': request_id,
+                'timestamp': pd.Timestamp.now().isoformat(),
+                'message': f'Fatal error in SSE stream: {str(e)}'
+            }
+            yield f"event: fatal_error\ndata: {json.dumps(final_error_data)}\n\n"
+    
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Nginx: disable buffering
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control",
+            "Content-Type": "text/event-stream"
+        }
+    )
 
 
 # Production runner
