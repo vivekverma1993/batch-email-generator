@@ -32,7 +32,9 @@ from .email_generator import (
 )
 from .background_processor import (
     process_ai_emails_background,
-    create_ai_placeholders
+    create_ai_placeholders,
+    create_all_placeholders,
+    process_all_emails_background
 )
 from .utils import (
     merge_results_in_order,
@@ -60,22 +62,31 @@ app = FastAPI(
 async def root():
     """Root endpoint with basic information"""
     return {
-        "message": "Welcome to Batch Email Generator API",
-        "version": "2.0.0",
+        "message": "Welcome to Batch Email Generator API - NOW WITH UNIFIED LLM PROCESSING",
+        "version": "2.1.0",
+        "major_update": "All emails now use LLM generation (both template and AI types)",
         "features": [
-            "Template-based email generation",
-            "Fake LinkedIn research",
-            "AI-powered personalization", 
+            "Unified LLM-based email generation",
+            "Template-guided LLM generation",
+            "AI-powered personalization with LinkedIn research", 
             "Industry-aware data generation",
-            "Batch processing with fallback"
+            "Background processing for all email types",
+            "UUID placeholder system",
+            "Unified result logging"
         ],
+        "processing_types": {
+            "template_llm": "LLM generation using template as base prompt (intelligence=false)",
+            "ai_research": "LLM generation with fake LinkedIn research (intelligence=true)"
+        },
         "endpoints": {
             "health": "/health",
             "docs": "/docs",
             "templates": "/templates",
             "generate_emails": "/generate-emails",
-            "test_metadata": "/process-emails-metadata"
-        }
+            "test_metadata": "/process-emails-metadata",
+            "task_status": "/task-status/{task_id}"
+        },
+        "important_note": "NO immediate email results - all processing happens in background with LLM API calls"
     }
 
 @app.get("/health")
@@ -181,7 +192,7 @@ async def process_emails_metadata(
         
         return {
             "status": "success",
-            "message": "CSV processed successfully - metadata only",
+            "message": "CSV processed successfully - metadata only (NEW: All emails use LLM)",
             "file_info": {
                 "filename": file.filename,
                 "size_bytes": len(contents),
@@ -189,15 +200,24 @@ async def process_emails_metadata(
             },
             "processing_info": {
                 "total_rows": len(df),
-                "ai_rows": len(ai_rows),
-                "template_rows": len(template_rows),
-                "processing_method": "parallel",
-                "ai_batch_size": INTELLIGENCE_BATCH_SIZE,
-                "estimated_output_size_mb": round((len(df) * 1000) / (1024 * 1024), 1)  # Rough estimate
+                "template_llm_rows": len(template_rows),  # These now use LLM too
+                "ai_research_rows": len(ai_rows),
+                "processing_method": "unified-llm-background",
+                "immediate_emails": 0,  # No immediate processing anymore
+                "background_emails": len(df),  # All emails go to background
+                "llm_batch_size": INTELLIGENCE_BATCH_SIZE,
+                "estimated_output_size_mb": round((len(df) * 1000) / (1024 * 1024), 1),
+                "estimated_processing_time_minutes": round((len(df) * 4) / 60, 1)  # ~4 seconds per LLM call
             },
             "template_info": get_template_info(template_type),
             "sample_emails": sample_emails,
-            "note": "This is metadata only. Use /generate-emails endpoint to download the full processed CSV file."
+            "important_changes": [
+                "All emails now use LLM generation (both template and AI types)",
+                "No immediate results - all processing happens in background",
+                "Response contains UUID placeholders for all emails",
+                "Results logged to unified_results_*.json files"
+            ],
+            "note": "This is metadata only. Use /generate-emails endpoint to get CSV with UUID placeholders. All processing now happens in background with LLM."
         }
         
     except pd.errors.EmptyDataError:
@@ -229,7 +249,9 @@ async def generate_emails(
     template_type: Optional[TemplateType] = Form(None, description="Fallback template type when CSV template_type column is empty. Uses sales_outreach if not provided.")
 ):
     """
-    Generate personalized emails from CSV data using background processing for optimal UX
+    Generate personalized emails from CSV data using unified LLM background processing
+    
+    **MAJOR CHANGE**: All emails now use LLM generation (both template and AI types)
     
     - **file**: CSV file with required columns: name, company, linkedin_url
               Optional columns: intelligence (true/false), template_type (template name)
@@ -239,25 +261,27 @@ async def generate_emails(
     - **name** (required): Contact's name
     - **company** (required): Contact's company name  
     - **linkedin_url** (required): Contact's LinkedIn profile URL
-    - **intelligence** (optional): true/false - Use AI research and generation vs templates
+    - **intelligence** (optional): true/false - Use AI with LinkedIn research vs LLM with template base
     - **template_type** (optional): Per-row template selection (overrides the fallback template_type parameter)
     
     Available template types: sales_outreach, recruitment, networking, partnership, follow_up, introduction, cold_email
     
-    **Processing Architecture:**
-    - **Template emails** (intelligence=false): Processed IMMEDIATELY (~0.01s per email)
-    - **AI emails** (intelligence=true): Processed in BACKGROUND (~3-8s per email)
-    - **Immediate Response**: CSV with template emails + UUID placeholders for AI emails
-    - **Background Logging**: AI results logged to JSON files when complete
+    **NEW Processing Architecture:**
+    - **Template LLM emails** (intelligence=false): LLM generation using template as base (~3-5s per email)
+    - **AI Research emails** (intelligence=true): LLM generation with LinkedIn research (~5-8s per email)
+    - **All Background Processing**: NO immediate results - everything processed in background
+    - **Immediate Response**: CSV with UUID placeholders for ALL emails
+    - **Unified Logging**: All results logged to unified_results_*.json files
     
     **Response Headers:**
     - X-Request-ID: Unique identifier for tracking background processing
-    - X-Immediate-Emails: Number of template emails returned immediately
-    - X-Background-AI-Emails: Number of AI emails processing in background
-    - X-AI-Status: "processing" or "none"
-    - X-JSON-Logs: Pattern for finding AI result JSON files
+    - X-Immediate-Emails: "0" (no immediate emails anymore)
+    - X-Background-Template-LLM-Emails: Number of template LLM emails processing
+    - X-Background-AI-Research-Emails: Number of AI research emails processing
+    - X-LLM-Status: "processing" (all emails use LLM)
+    - X-JSON-Logs: Pattern for finding unified result JSON files
     
-    Returns: CSV file with template emails + AI placeholders (UUIDs)
+    Returns: CSV file with UUID placeholders for ALL emails (no immediate results)
     """
     
     # Validate file type
@@ -276,39 +300,25 @@ async def generate_emails(
         df = validate_and_enhance_csv(df)
         validate_csv_size(df, MAX_CSV_ROWS)
         
-        # BACKGROUND PROCESSING: Split DataFrame for immediate vs background processing
+        # UNIFIED LLM PROCESSING: All emails now use LLM (both template and AI)
         ai_rows, template_rows = split_dataframe_by_intelligence(df)
         
         # Generate unique request ID for tracking
         request_id = generate_request_id()
         
-        print(f"Request {request_id}: Processing {len(df)} rows")
-        print(f"   Template emails: {len(template_rows)} (immediate)")
-        print(f"   AI emails: {len(ai_rows)} (background)")
+        print(f"Request {request_id}: Processing {len(df)} rows (ALL with LLM)")
+        print(f"   Template LLM emails: {len(template_rows)} (background)")
+        print(f"   AI research emails: {len(ai_rows)} (background)")
         
-        # 1. Process template emails IMMEDIATELY
-        template_results = {}
-        if not template_rows.empty:
-            print(f"Processing {len(template_rows)} template emails immediately...")
-            import time
-            start_time = time.time()
-            template_results = await process_template_dataframe(template_rows, template_type)
-            template_time = time.time() - start_time
-            print(f"Template emails completed in {template_time:.3f}s")
+        # 1. Create placeholders for ALL emails (both types now use LLM)
+        all_placeholders, all_uuid_mapping = create_all_placeholders(df)
+        generated_emails = merge_results_in_order(df, all_placeholders)
         
-        # 2. Add placeholder UUIDs for AI emails
-        ai_placeholders, ai_uuid_mapping = create_ai_placeholders(ai_rows)
-        
-        # 3. Combine immediate results with AI placeholders
-        all_results = {**template_results, **ai_placeholders}
-        generated_emails = merge_results_in_order(df, all_results)
-        
-        # 4. Start background AI processing (fire and forget)
-        if not ai_rows.empty:
-            print(f"Starting background AI processing for request {request_id}")
-            asyncio.create_task(
-                process_ai_emails_background(request_id, ai_rows, template_type, ai_uuid_mapping)
-            )
+        # 2. Start unified background processing for ALL emails
+        print(f"Starting unified background LLM processing for request {request_id}")
+        asyncio.create_task(
+            process_all_emails_background(request_id, df, template_type, all_uuid_mapping)
+        )
         
         # Add generated emails to dataframe
         df['generated_email'] = generated_emails
@@ -322,9 +332,8 @@ async def generate_emails(
         def iter_csv():
             yield csv_content
         
-        immediate_emails = len(template_rows)
-        background_emails = len(ai_rows) 
-        print(f"Request {request_id}: Returning {immediate_emails} immediate emails, {background_emails} processing in background")
+        # All emails are now processed in background with LLM
+        print(f"Request {request_id}: Returning CSV with {len(df)} placeholder UUIDs, all processing in background")
         
         # Calculate final file size for headers
         final_size_mb = calculate_file_size_mb(csv_content)
@@ -336,12 +345,13 @@ async def generate_emails(
                 "Content-Disposition": f"attachment; filename=generated_{file.filename}",
                 "X-Request-ID": request_id,
                 "X-Total-Rows": str(len(df)),
-                "X-Immediate-Emails": str(len(template_rows)),
-                "X-Background-AI-Emails": str(len(ai_rows)),
-                "X-Processing-Method": "background",
+                "X-Background-Template-LLM-Emails": str(len(template_rows)),
+                "X-Background-AI-Research-Emails": str(len(ai_rows)),
+                "X-Immediate-Emails": "0",  # No immediate emails anymore
+                "X-Processing-Method": "unified-llm-background",
                 "X-Template-Type": template_type.value if template_type else DEFAULT_TEMPLATE_TYPE.value,
-                "X-AI-Status": "processing" if len(ai_rows) > 0 else "none",
-                "X-JSON-Logs": "ai_results_*.json" if len(ai_rows) > 0 else "none",
+                "X-LLM-Status": "processing",  # All emails use LLM now
+                "X-JSON-Logs": f"unified_results_{request_id}_*.json",
                 "X-File-Size-MB": str(final_size_mb),
                 "X-Original-Filename": file.filename,
                 "Cache-Control": "no-cache, no-store, must-revalidate",

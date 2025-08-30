@@ -13,7 +13,7 @@ from typing import Optional
 
 from .templates import TemplateType, get_template_content
 from .linkedin_research import research_linkedin_profile
-from .ai_generator import generate_ai_email
+from .ai_generator import generate_ai_email, generate_ai_email_from_template
 from .utils import create_batches
 
 
@@ -128,26 +128,77 @@ async def generate_intelligent_email(row: pd.Series, fallback_template_type: Opt
 
 async def generate_template_email(row: pd.Series, fallback_template_type: Optional[TemplateType] = None) -> str:
     """
-    Generate traditional template-based email
+    Generate LLM-based email using template as base prompt
     
     Args:
         row: DataFrame row containing contact information
         fallback_template_type: Template type to use when row template_type is empty
         
     Returns:
-        Template-generated email content
+        LLM-generated email content based on template
     """
     try:
         # Determine template type for this row
         row_template_type = row.get('template_type')
         
-        # Use row template if specified, otherwise use fallback
         if row_template_type and row_template_type.strip():
             try:
-                # Try to convert string to TemplateType enum
                 template_type = TemplateType(row_template_type.strip())
             except (ValueError, AttributeError):
-                # Invalid template type, use fallback
+                template_type = fallback_template_type
+        else:
+            template_type = fallback_template_type
+        
+        # Create user info for LLM generation
+        user_info = {
+            'name': str(row.get('name', '')),
+            'company': str(row.get('company', '')),
+            'linkedin_url': str(row.get('linkedin_url', ''))
+        }
+        
+        # Get template type as string for LLM prompt
+        template_type_str = template_type.value if template_type else 'sales_outreach'
+        
+        # Use LLM to generate email based on template (no LinkedIn research)
+        ai_result = await generate_ai_email_from_template(user_info, template_type_str)
+        
+        if ai_result.status.value == "success":
+            return ai_result.email_content or "[Template LLM generation succeeded but no content returned]"
+        else:
+            # Fallback to static template if LLM fails
+            if AI_FALLBACK_TO_TEMPLATE:
+                print(f"Template LLM generation failed ({ai_result.error_message}), falling back to static template for {user_info['name']}")
+                return await generate_static_template_email(row, fallback_template_type)
+            else:
+                return f"Template LLM generation failed: {ai_result.error_message}"
+    
+    except Exception as e:
+        if AI_FALLBACK_TO_TEMPLATE:
+            print(f"Unexpected error in template LLM generation ({str(e)}), falling back to static template")
+            return await generate_static_template_email(row, fallback_template_type)
+        else:
+            return f"Error in template LLM generation: {str(e)}"
+
+
+async def generate_static_template_email(row: pd.Series, fallback_template_type: Optional[TemplateType] = None) -> str:
+    """
+    Generate traditional static template-based email (fallback method)
+    
+    Args:
+        row: DataFrame row containing contact information
+        fallback_template_type: Template type to use when row template_type is empty
+        
+    Returns:
+        Static template-generated email content
+    """
+    try:
+        # Determine template type for this row
+        row_template_type = row.get('template_type')
+        
+        if row_template_type and row_template_type.strip():
+            try:
+                template_type = TemplateType(row_template_type.strip())
+            except (ValueError, AttributeError):
                 template_type = fallback_template_type
         else:
             template_type = fallback_template_type
@@ -168,7 +219,7 @@ async def generate_template_email(row: pd.Series, fallback_template_type: Option
         return email_content.strip()
     
     except Exception as e:
-        return f"Error generating template email: {str(e)}"
+        return f"Error generating static template email: {str(e)}"
 
 
 async def process_ai_dataframe(ai_df: pd.DataFrame, fallback_template_type: Optional[TemplateType] = None) -> dict:
@@ -224,10 +275,10 @@ async def process_ai_dataframe(ai_df: pd.DataFrame, fallback_template_type: Opti
 
 async def process_template_dataframe(template_df: pd.DataFrame, fallback_template_type: Optional[TemplateType] = None) -> dict:
     """
-    Process template DataFrame with large batches (fast processing)
+    Process template DataFrame with LLM calls (now requires batching due to API latency)
     
     Args:
-        template_df: DataFrame containing rows that need template processing
+        template_df: DataFrame containing rows that need template LLM processing
         fallback_template_type: Template type to use when row template_type is empty
         
     Returns:
@@ -236,24 +287,39 @@ async def process_template_dataframe(template_df: pd.DataFrame, fallback_templat
     if template_df.empty:
         return {}
     
-    print(f"  TEMPLATE TASK STARTED: Processing {len(template_df)} rows (concurrent)")
+    print(f"  TEMPLATE LLM TASK STARTED: Processing {len(template_df)} rows with LLM")
     start_time = time.time()
-    
-    # Template generation is fast, so we can use larger batches
-    template_tasks = []
-    for _, row in template_df.iterrows():
-        task = generate_template_email(row, fallback_template_type)
-        template_tasks.append((row.name, task))
-    
-    # Process all template emails concurrently (they're fast)
-    template_results = await asyncio.gather(*[task for _, task in template_tasks])
-    
-    # Store results with original index
     results = {}
-    for (original_idx, _), result in zip(template_tasks, template_results):
-        results[original_idx] = result
     
-    template_time = time.time() - start_time
-    print(f"  TEMPLATE TASK COMPLETED: {len(results)} emails in {template_time:.3f}s")
+    # Use smaller batches for template LLM processing due to API rate limits
+    # Use same batch size as AI processing since both use LLM now
+    template_batches = create_batches(template_df, INTELLIGENCE_BATCH_SIZE)
+    print(f"    Template LLM processing: {len(template_df)} rows in {len(template_batches)} batches of {INTELLIGENCE_BATCH_SIZE}")
+    
+    for batch_idx, batch_df in enumerate(template_batches, 1):
+        batch_start = time.time()
+        print(f"    Template LLM batch {batch_idx}/{len(template_batches)} ({len(batch_df)} rows) - starting...")
+        
+        # Process template LLM batch with concurrent tasks
+        batch_tasks = []
+        for _, row in batch_df.iterrows():
+            task = generate_template_email(row, fallback_template_type)
+            batch_tasks.append((row.name, task))
+        
+        batch_results = await asyncio.gather(*[task for _, task in batch_tasks])
+        
+        # Store results with original index
+        for (original_idx, _), result in zip(batch_tasks, batch_results):
+            results[original_idx] = result
+        
+        batch_time = time.time() - batch_start
+        print(f"    Template LLM batch {batch_idx}/{len(template_batches)} completed in {batch_time:.2f}s")
+        
+        # Add small delay between template LLM batches for rate limiting
+        if batch_idx < len(template_batches):
+            await asyncio.sleep(0.5)
+    
+    total_template_time = time.time() - start_time
+    print(f"  TEMPLATE LLM TASK COMPLETED: {len(results)} emails in {total_template_time:.2f}s")
     
     return results

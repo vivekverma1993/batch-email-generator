@@ -22,7 +22,7 @@ import json
 # OpenAI import
 from openai import AsyncOpenAI
 
-from .linkedin_research import ResearchResult, ProfileData
+from .linkedin_research import ResearchResult, ProfileData, ResearchStatus
 from .templates import TemplateType, EMAIL_TEMPLATES
 
 
@@ -325,6 +325,41 @@ async def generate_ai_email(research_data: ResearchResult, user_info: Dict[str, 
     """
     generator = AIEmailGenerator()
     return await generator.generate_intelligent_email(research_data, user_info, template_type)
+
+
+async def generate_ai_email_from_template(user_info: Dict[str, Any], template_type: str = None) -> GenerationResult:
+    """
+    Generate LLM-based email using template as base (without LinkedIn research)
+    
+    Args:
+        user_info: User information from CSV (name, company, linkedin_url)
+        template_type: Email template type (sales_outreach, recruitment, etc.)
+        
+    Returns:
+        GenerationResult: Generated email and metadata
+    """
+    generator = AIEmailGenerator()
+    
+    # Create a minimal research result (no LinkedIn research for template-based)
+    minimal_research = ResearchResult(
+        status=ResearchStatus.SUCCESS,
+        profile_data=ProfileData(
+            name=user_info.get('name', ''),
+            current_company=user_info.get('company', ''),
+            current_title="Professional",  # Generic title
+            location="Unknown",
+            industry="Business",
+            experience_years=5,
+            education="Professional Education",
+            skills=[],
+            recent_posts=[]
+        ),
+        research_time_seconds=0.0,  # Fixed: use correct parameter name
+        error_message=None,
+        data_quality_score=0.5  # Added missing parameter
+    )
+    
+    return await generator.generate_intelligent_email(minimal_research, user_info, template_type)
 
 
 def validate_ai_configuration() -> tuple[bool, Optional[str]]:
