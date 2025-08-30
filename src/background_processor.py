@@ -12,6 +12,12 @@ import pandas as pd
 from datetime import datetime
 from typing import Optional
 
+# Database imports
+from .database.services import (
+    EmailRequestService, GeneratedEmailService, ProcessingBatchService,
+    ProcessingErrorService, SystemMetricService, AnalyticsService
+)
+
 from .templates import TemplateType
 from .email_generator import process_ai_dataframe, process_template_dataframe
 
@@ -207,8 +213,8 @@ async def process_all_emails_background(
         processing_time = time.time() - start_time
         print(f"Unified background processing completed for request {request_id} in {processing_time:.2f}s")
         
-        # Log results to JSON
-        log_unified_results_to_json(request_id, combined_results, all_rows, processing_time, uuid_mapping)
+        # Save results to database
+        log_unified_results_to_database(request_id, combined_results, all_rows, processing_time, uuid_mapping)
         
     except Exception as e:
         print(f"Unified background processing failed for request {request_id}: {str(e)}")
@@ -217,7 +223,7 @@ async def process_all_emails_background(
         log_unified_error_to_json(request_id, e, all_rows)
 
 
-def log_unified_results_to_json(
+def log_unified_results_to_database(
     request_id: str, 
     all_results: dict, 
     original_rows: pd.DataFrame, 
@@ -225,14 +231,97 @@ def log_unified_results_to_json(
     uuid_mapping: Optional[dict] = None
 ):
     """
-    Log completed unified email results to structured JSON file
+    Save completed unified email results to database
     
     Args:
         request_id: Unique identifier for the request
-        all_results: Dictionary of all generated email results
+        all_results: Dictionary of all generated email results (row_index -> email_content)
         original_rows: Original rows DataFrame  
         processing_time: Time taken to process all emails
         uuid_mapping: Mapping of row indices to UUIDs from CSV placeholders
+    """
+    try:
+        successful_count = 0
+        failed_count = 0
+        total_tokens = 0
+        total_cost = 0.0
+        
+        # Update each email record with results
+        for _, row in original_rows.iterrows():
+            row_index = row.name
+            generated_content = all_results.get(row_index, "")
+            
+            # Find the corresponding database record by UUID
+            row_uuid = uuid_mapping.get(row_index) if uuid_mapping else None
+            if row_uuid:
+                email_record = GeneratedEmailService.get_email_by_uuid(str(row_uuid))
+                if email_record:
+                    # Determine if generation was successful
+                    is_successful = bool(generated_content and not generated_content.startswith("Error:"))
+                    
+                    # Estimate tokens and cost (these would normally come from the actual generation)
+                    estimated_tokens = len(generated_content.split()) * 1.3 if generated_content else 0  # Rough token estimate
+                    estimated_cost = estimated_tokens * 0.00001  # Rough cost estimate
+                    
+                    # Update the email record
+                    GeneratedEmailService.update_email_completion(
+                        email_id=email_record.id,
+                        generated_email=generated_content if is_successful else "",
+                        llm_model="gpt-4o-mini",  # Default model
+                        prompt_tokens=int(estimated_tokens * 0.8),
+                        completion_tokens=int(estimated_tokens * 0.2),
+                        processing_time=processing_time / len(original_rows),  # Average time per email
+                        cost=estimated_cost,
+                        error_message=generated_content if not is_successful else None
+                    )
+                    
+                    if is_successful:
+                        successful_count += 1
+                        total_tokens += estimated_tokens
+                        total_cost += estimated_cost
+                    else:
+                        failed_count += 1
+        
+        # Update the request with final results
+        EmailRequestService.update_request_completion(
+            request_id=request_id,
+            status="completed" if failed_count == 0 else ("partial" if successful_count > 0 else "failed"),
+            successful_emails=successful_count,
+            failed_emails=failed_count,
+            total_tokens=int(total_tokens),
+            estimated_cost=total_cost,
+            processing_time=processing_time
+        )
+        
+        # Record system metrics
+        SystemMetricService.record_metric("emails_processed", len(all_results), "count", request_id)
+        SystemMetricService.record_metric("processing_time", processing_time, "seconds", request_id)
+        SystemMetricService.record_metric("tokens_used", total_tokens, "tokens", request_id)
+        SystemMetricService.record_metric("processing_cost", total_cost, "usd", request_id)
+        
+        print(f"Unified results saved to database: {successful_count} successful, {failed_count} failed")
+        
+        # Also create a JSON backup for compatibility (optional)
+        try:
+            log_unified_results_to_json_backup(request_id, all_results, original_rows, processing_time, uuid_mapping)
+        except Exception as json_error:
+            print(f"Warning: JSON backup failed: {json_error}")
+        
+    except Exception as e:
+        print(f"Error saving unified results to database: {str(e)}")
+        # Fall back to JSON logging if database fails
+        log_unified_results_to_json_backup(request_id, all_results, original_rows, processing_time, uuid_mapping)
+
+
+def log_unified_results_to_json_backup(
+    request_id: str, 
+    all_results: dict, 
+    original_rows: pd.DataFrame, 
+    processing_time: float, 
+    uuid_mapping: Optional[dict] = None
+):
+    """
+    JSON backup logging (fallback when database fails)
     """
     try:
         # Prepare structured data
@@ -242,15 +331,13 @@ def log_unified_results_to_json(
             "processing_time_seconds": round(processing_time, 2),
             "total_emails": len(all_results),
             "processing_method": "unified_llm",
+            "database_fallback": True,  # Indicate this was a fallback
             "results": []
         }
         
         # Add each result
         for _, row in original_rows.iterrows():
-            # Use the same UUID that was used in the CSV placeholder
             row_uuid = uuid_mapping.get(row.name) if uuid_mapping else str(uuid.uuid4())
-            
-            # Determine processing type
             processing_type = "ai_with_research" if row.get('intelligence', False) else "template_llm"
             
             result_data = {
@@ -271,10 +358,10 @@ def log_unified_results_to_json(
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(log_entry, f, indent=2, ensure_ascii=False)
         
-        print(f"Unified results logged to {filename}")
+        print(f"Backup JSON results logged to {filename}")
         
     except Exception as e:
-        print(f"Error logging unified results: {str(e)}")
+        print(f"Error logging backup JSON results: {str(e)}")
 
 
 def create_ai_placeholders(ai_rows: pd.DataFrame) -> tuple[dict, dict]:
