@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, AsyncGenerator
 import pandas as pd
@@ -6,11 +6,15 @@ import io
 import asyncio
 import os
 import json
+import logging
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Import template functionality
 from .templates import (
@@ -689,7 +693,7 @@ async def download_csv_with_placeholders(request_id: str):
             raise HTTPException(status_code=404, detail="Request not found")
         
         # Get all emails for this request
-        emails = GeneratedEmailService.get_emails_by_request_id(request_id)
+        emails = GeneratedEmailService.get_emails_for_request(request_id)
         if not emails:
             raise HTTPException(status_code=404, detail="No emails found for this request")
         
@@ -720,7 +724,7 @@ async def download_csv_with_placeholders(request_id: str):
             iter_csv(),
             media_type="text/csv; charset=utf-8",
             headers={
-                "Content-Disposition": f"attachment; filename=generated_{request['original_filename']}",
+                "Content-Disposition": f"attachment; filename=generated_{request.original_filename}",
                 "X-Request-ID": request_id,
                 "Cache-Control": "no-cache, no-store, must-revalidate"
             }
@@ -845,6 +849,180 @@ async def get_performance_analytics(days: int = 7):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving analytics: {str(e)}")
+
+
+@app.get("/requests")
+async def get_email_requests(
+    page: int = Query(1, ge=1, description="Page number starting from 1"),
+    limit: int = Query(10, ge=1, le=50, description="Items per page (max 50)"),
+    status: Optional[str] = Query(None, description="Filter by status: processing, completed, failed, partial")
+):
+    """Get paginated list of email requests"""
+    try:
+        # Calculate offset
+        offset = (page - 1) * limit
+        
+        # Get requests from database
+        db_manager = get_database_manager()
+        with db_manager.session_scope() as session:
+            from .database.models import EmailRequest
+            
+            # Build query
+            query = session.query(EmailRequest)
+            
+            # Apply status filter if provided
+            if status:
+                query = query.filter(EmailRequest.status == status)
+            
+            # Get total count
+            total_count = query.count()
+            
+            # Apply pagination and ordering
+            requests = query.order_by(EmailRequest.created_at.desc()).offset(offset).limit(limit).all()
+            
+            # Convert to dict format
+            request_list = []
+            for req in requests:
+                # Get real-time email counts from GeneratedEmail table
+                email_counts = GeneratedEmailService.get_email_counts_for_request(req.request_id)
+                
+                # Calculate real-time total cost from individual emails
+                from .database.models import GeneratedEmail
+                from sqlalchemy import func
+                total_cost_result = session.query(func.sum(GeneratedEmail.cost_usd))\
+                                         .filter(GeneratedEmail.request_id == req.request_id)\
+                                         .scalar()
+                actual_total_cost = float(total_cost_result or 0)
+                
+                request_dict = {
+                    'request_id': req.request_id,
+                    'original_filename': req.original_filename,
+                    'file_size_mb': float(req.file_size_mb) if req.file_size_mb else 0,
+                    'total_rows': req.total_rows,
+                    'template_llm_rows': req.template_llm_rows,
+                    'ai_research_rows': req.ai_research_rows,
+                    'status': req.status,
+                    'fallback_template_type': req.fallback_template_type,
+                    'created_at': req.created_at.isoformat() if req.created_at else None,
+                    'processing_completed_at': req.processing_completed_at.isoformat() if req.processing_completed_at else None,
+                    'total_processing_time_seconds': float(req.total_processing_time_seconds) if req.total_processing_time_seconds else 0,
+                    'estimated_cost_usd': actual_total_cost,  # Use calculated real-time cost
+                    'successful_emails': email_counts['completed'],  # Use real-time count
+                    'failed_emails': email_counts['failed']  # Use real-time count
+                }
+                request_list.append(request_dict)
+            
+            # Calculate pagination info
+            total_pages = (total_count + limit - 1) // limit
+            has_next = page < total_pages
+            has_prev = page > 1
+            
+            return {
+                "requests": request_list,
+                "pagination": {
+                    "current_page": page,
+                    "total_pages": total_pages,
+                    "total_items": total_count,
+                    "items_per_page": limit,
+                    "has_next": has_next,
+                    "has_prev": has_prev
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"Error fetching requests: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch requests: {str(e)}")
+
+
+@app.get("/requests/{request_id}/details")
+async def get_request_details(request_id: str):
+    """Get detailed information about a specific request including email samples"""
+    try:
+        # Get request details
+        request_info = EmailRequestService.get_request(request_id)
+        if not request_info:
+            raise HTTPException(status_code=404, detail="Request not found")
+        
+        # Get email counts
+        email_counts = GeneratedEmailService.get_email_counts_for_request(request_id)
+        
+        # Calculate real-time total cost from individual emails
+        db_manager = get_database_manager()
+        with db_manager.session_scope() as session:
+            from .database.models import GeneratedEmail
+            from sqlalchemy import func
+            total_cost_result = session.query(func.sum(GeneratedEmail.cost_usd))\
+                                     .filter(GeneratedEmail.request_id == request_id)\
+                                     .scalar()
+            actual_total_cost = float(total_cost_result or 0)
+        
+        # Get sample emails (first 5 successful and failed)
+        db_manager = get_database_manager()
+        with db_manager.session_scope() as session:
+            from .database.models import GeneratedEmail
+            
+            successful_samples = session.query(GeneratedEmail).filter(
+                GeneratedEmail.request_id == request_id,
+                GeneratedEmail.status == 'completed'
+            ).limit(5).all()
+            
+            failed_samples = session.query(GeneratedEmail).filter(
+                GeneratedEmail.request_id == request_id,
+                GeneratedEmail.status == 'failed'
+            ).limit(5).all()
+            
+            # Convert to dict
+            successful_emails = []
+            for email in successful_samples:
+                successful_emails.append({
+                    'email_id': email.id,
+                    'placeholder_uuid': str(email.placeholder_uuid) if email.placeholder_uuid else None,
+                    'name': email.name,
+                    'company': email.company,
+                    'template_type': email.template_type,
+                    'generated_email': email.generated_email[:200] + '...' if email.generated_email and len(email.generated_email) > 200 else email.generated_email,
+                    'processing_time_seconds': float(email.processing_time_seconds) if email.processing_time_seconds else 0,
+                    'cost_usd': float(email.cost_usd) if email.cost_usd else 0
+                })
+            
+            failed_emails = []
+            for email in failed_samples:
+                failed_emails.append({
+                    'email_id': email.id,
+                    'placeholder_uuid': str(email.placeholder_uuid) if email.placeholder_uuid else None,
+                    'name': email.name,
+                    'company': email.company,
+                    'template_type': email.template_type,
+                    'error_message': email.error_message
+                })
+        
+        return {
+            "request": {
+                'request_id': request_info.request_id,
+                'original_filename': request_info.original_filename,
+                'file_size_mb': float(request_info.file_size_mb) if request_info.file_size_mb else 0,
+                'total_rows': request_info.total_rows,
+                'template_llm_rows': request_info.template_llm_rows,
+                'ai_research_rows': request_info.ai_research_rows,
+                'status': request_info.status,
+                'fallback_template_type': request_info.fallback_template_type,
+                'created_at': request_info.created_at.isoformat() if request_info.created_at else None,
+                'processing_completed_at': request_info.processing_completed_at.isoformat() if request_info.processing_completed_at else None,
+                'total_processing_time_seconds': float(request_info.total_processing_time_seconds) if request_info.total_processing_time_seconds else 0,
+                'estimated_cost_usd': actual_total_cost  # Use calculated real-time cost
+            },
+            "email_counts": email_counts,
+            "samples": {
+                "successful_emails": successful_emails,
+                "failed_emails": failed_emails
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching request details: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch request details: {str(e)}")
 
 
 @app.get("/stream/requests/{request_id}")

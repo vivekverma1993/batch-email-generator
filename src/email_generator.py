@@ -50,7 +50,7 @@ def save_batch_to_database(request_id: str, batch_results: dict, original_df: pd
                 placeholder_uuid=str(placeholder_uuid),
                 generated_email=email_content,
                 processing_time_seconds=0.8,  # Approximate time per email
-                cost_usd=0.002  # Approximate cost per email
+                cost_usd=0.0003  # Realistic cost per email based on GPT-4o-mini pricing
             )
             
             if success:

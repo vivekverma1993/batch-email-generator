@@ -262,9 +262,10 @@ def log_unified_results_to_database(
                     # Determine if generation was successful
                     is_successful = bool(generated_content and not generated_content.startswith("Error:"))
                     
-                    # Estimate tokens and cost (these would normally come from the actual generation)
+                    # Estimate tokens and cost based on realistic GPT-4o-mini pricing
                     estimated_tokens = len(generated_content.split()) * 1.3 if generated_content else 0  # Rough token estimate
-                    estimated_cost = estimated_tokens * 0.00001  # Rough cost estimate
+                    # GPT-4o-mini: ~$0.15/1M input + $0.60/1M output tokens, average ~$0.3/1M tokens
+                    estimated_cost = estimated_tokens * 0.0000003  # Realistic cost estimate
                     
                     # Update the email record
                     GeneratedEmailService.update_email_completion(

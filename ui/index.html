@@ -505,9 +505,10 @@
     <header class="header">
         <div class="header-content">
             <div class="logo">Email Generator</div>
-            <div style="font-size: 0.875rem; color: var(--gray-600);">
-                Batch Email Processing
-            </div>
+            <nav style="display: flex; gap: 2rem; align-items: center;">
+                <a href="index.html" style="color: var(--primary-color); text-decoration: none; font-weight: 600;">Upload & Process</a>
+                <a href="history.html" style="color: var(--gray-600); text-decoration: none; font-weight: 500; transition: color 0.2s ease;" onmouseover="this.style.color='var(--primary-color)'" onmouseout="this.style.color='var(--gray-600)'">Request History</a>
+            </nav>
         </div>
     </header>
 
@@ -621,6 +622,7 @@
         let completedEmails = 0;
         let failedEmails = 0;
         let totalEmails = 0;
+        let isProcessing = false;
 
         // Modern file upload functionality
         const fileInput = document.getElementById('csvFile');
@@ -721,7 +723,50 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
         }
 
+        function disableUploadUI() {
+            const uploadBtn = document.getElementById('uploadBtn');
+            const templateSelect = document.getElementById('templateType');
+            
+            // Disable upload button and form elements
+            uploadBtn.disabled = true;
+            templateSelect.disabled = true;
+            fileInput.disabled = true;
+            
+            // Disable drop zone interactions
+            dropZone.style.pointerEvents = 'none';
+            dropZone.style.opacity = '0.6';
+            
+            // Update button state
+            document.getElementById('uploadBtnText').textContent = 'Processing in Progress...';
+        }
+
+        function enableUploadUI() {
+            const uploadBtn = document.getElementById('uploadBtn');
+            const uploadBtnText = document.getElementById('uploadBtnText');
+            const uploadSpinner = document.getElementById('uploadSpinner');
+            const templateSelect = document.getElementById('templateType');
+            
+            // Re-enable upload button and form elements
+            uploadBtn.disabled = false;
+            templateSelect.disabled = false;
+            fileInput.disabled = false;
+            
+            // Re-enable drop zone interactions
+            dropZone.style.pointerEvents = 'auto';
+            dropZone.style.opacity = '1';
+            
+            // Reset button state
+            uploadBtnText.textContent = 'Start Processing';
+            uploadSpinner.classList.add('hidden');
+        }
+
         async function uploadAndProcess() {
+            // Check if already processing
+            if (isProcessing) {
+                alert('Processing is already in progress. Please wait for it to complete before starting a new request.');
+                return;
+            }
+
             const templateType = document.getElementById('templateType').value;
             const uploadBtn = document.getElementById('uploadBtn');
             const uploadBtnText = document.getElementById('uploadBtnText');
@@ -741,7 +786,8 @@
                 return;
             }
 
-            // Update button state
+            // Set processing state and disable UI
+            isProcessing = true;
             uploadBtn.disabled = true;
             uploadBtnText.textContent = 'Processing...';
             uploadSpinner.classList.remove('hidden');
@@ -762,6 +808,9 @@
                     currentRequestId = result.request_id;
                     totalEmails = result.processing_info.total_emails;
                     
+                    // Disable the entire upload UI during processing
+                    disableUploadUI();
+                    
                     showProcessingState();
                     connectToSSE(currentRequestId);
                 } else {
@@ -769,11 +818,9 @@
                 }
             } catch (error) {
                 alert(`Upload failed: ${error.message}`);
-            } finally {
-                // Reset button state
-                uploadBtn.disabled = false;
-                uploadBtnText.textContent = 'Start Processing';
-                uploadSpinner.classList.add('hidden');
+                // Re-enable UI on upload error
+                isProcessing = false;
+                enableUploadUI();
             }
         }
 
@@ -839,6 +886,10 @@
                     statusBadge.className = 'status-badge status-completed';
                     
                     document.getElementById('downloadSection').classList.remove('hidden');
+                    
+                    // Re-enable upload UI after processing completes
+                    isProcessing = false;
+                    enableUploadUI();
                 } catch (e) {
                     console.error('Error processing completion:', e);
                 }
@@ -846,6 +897,13 @@
 
             eventSource.addEventListener('connection_closing', function(event) {
                 disconnect();
+            });
+
+            eventSource.addEventListener('error', function(event) {
+                console.error('SSE error occurred');
+                // Re-enable UI on connection error
+                isProcessing = false;
+                enableUploadUI();
             });
 
             eventSource.onerror = function(event) {
@@ -891,6 +949,13 @@
                 eventSource.removeEventListener('onerror', null);
                 eventSource.close();
                 eventSource = null;
+                console.log('SSE connection closed');
+                
+                // Re-enable UI when disconnecting (in case of manual disconnect or errors)
+                if (isProcessing) {
+                    isProcessing = false;
+                    enableUploadUI();
+                }
             }
         }
 
