@@ -24,6 +24,7 @@ from openai import AsyncOpenAI
 
 from .linkedin_research import ResearchResult, ProfileData, ResearchStatus
 from .templates import TemplateType, EMAIL_TEMPLATES
+from .utils import get_random_agent_info
 
 
 class GenerationStatus(Enum):
@@ -102,10 +103,15 @@ class AIEmailGenerator:
         Returns:
             str: Formatted prompt for OpenAI API
         """
-        # Extract user information
+        # Extract user information (recipient)
         name = user_info.get('name', 'Unknown')
         company = user_info.get('company', 'Unknown Company')
         template_type = template_type or 'sales_outreach'
+        
+        # Get random agent information (sender)
+        agent_info = get_random_agent_info()
+        agent_name = agent_info['agent_name']
+        agent_company = agent_info['company_name']
         
         # Build comprehensive research context
         research_context = ""
@@ -144,6 +150,10 @@ Professional Background:
         prompt = f"""
 You are an expert email writer specializing in personalized business outreach emails.
 
+SENDER INFORMATION (YOU):
+- Your Name: {agent_name}
+- Your Company: {agent_company}
+
 TARGET PERSON PROFILE:
 {research_context}
 
@@ -159,10 +169,12 @@ WRITING GUIDELINES:
 5. Include a clear, specific call to action
 6. Keep it concise (2-3 paragraphs maximum)
 7. Write in first person as if you're reaching out directly
+8. IMPORTANT: Use your actual name ({agent_name}) and company ({agent_company}) - DO NOT use placeholders like [Your Name] or [Your Company]
+9. Sign the email with your name: {agent_name}
 
 EMAIL FORMAT: Return only the email body content (no subject line, no signature block).
 
-Write the personalized {template_type.replace('_', ' ')} email:
+Write the personalized {template_type.replace('_', ' ')} email from {agent_name} at {agent_company}:
 """
         
         return prompt.strip()

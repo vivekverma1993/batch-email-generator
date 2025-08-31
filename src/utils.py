@@ -6,6 +6,7 @@ Common helper functions used across the Batch Email Generator application.
 
 import pandas as pd
 from typing import List
+import random
 
 
 def create_batches(df: pd.DataFrame, batch_size: int) -> List[pd.DataFrame]:
@@ -100,3 +101,38 @@ def generate_placeholder_uuid() -> str:
     """
     import uuid
     return str(uuid.uuid4())
+
+
+# Agent information for email generation
+AGENT_NAMES = [
+    "Sarah Chen",
+    "Alex Rodriguez",
+    "Emily Johnson",
+    "Michael Thompson", 
+    "Jessica Williams",
+    "David Kim",
+    "Rachel Martinez",
+    "James Anderson",
+    "Amanda Davis",
+    "Ryan O'Connor",
+    "Lisa Zhang",
+    "Mark Stevens",
+    "Nicole Brown",
+    "Chris Wilson",
+    "Samantha Taylor"
+]
+
+COMPANY_NAME = "FlairLabs Inc."
+
+
+def get_random_agent_info() -> dict:
+    """
+    Get random agent information for email generation
+    
+    Returns:
+        Dictionary with agent name and company information
+    """
+    return {
+        "agent_name": random.choice(AGENT_NAMES),
+        "company_name": COMPANY_NAME
+    }

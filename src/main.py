@@ -1227,7 +1227,7 @@ async def stream_request_progress(request_id: str):
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Nginx: disable buffering
+            "X-Accel-Buffering": "no", 
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Cache-Control",
             "Content-Type": "text/event-stream"
