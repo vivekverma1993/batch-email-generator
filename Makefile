@@ -253,7 +253,7 @@ setup:
 	@echo "First-time setup..."
 	@if [ ! -f .env ]; then \
 		echo "Creating .env file from template..."; \
-		cp docker/docker.env .env; \
+		cp env.example .env; \
 		echo "Please edit .env and add your OPENAI_API_KEY"; \
 		echo "   Then run: make up"; \
 	else \

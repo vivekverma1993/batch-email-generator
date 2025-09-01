@@ -27,8 +27,8 @@ class DatabaseConfig:
         self.host = os.getenv("DB_HOST", "localhost")
         self.port = int(os.getenv("DB_PORT", "5432"))
         self.database = os.getenv("DB_NAME", "email_generator")
-        self.username = os.getenv("DB_USER", "batch_processor")
-        self.password = os.getenv("DB_PASSWORD", "batch_processor")
+        self.username = os.getenv("DB_USER", "email_user")
+        self.password = os.getenv("DB_PASSWORD", "secure_email_password_123")
         
         # Connection pool settings
         self.pool_size = int(os.getenv("DB_POOL_SIZE", "10"))

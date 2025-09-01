@@ -26,7 +26,7 @@ echo "Docker and Docker Compose are installed"
 # Check if .env file exists
 if [ ! -f ".env" ]; then
     echo "Creating .env file from template..."
-    cp docker/docker.env .env
+    cp env.example .env
     echo
     echo "  IMPORTANT: Please edit .env file and set your OPENAI_API_KEY"
     echo "   You can get one at: https://platform.openai.com/"

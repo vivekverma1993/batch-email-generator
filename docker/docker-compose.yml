@@ -7,9 +7,9 @@ services:
     container_name: email-generator-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: email_generator
-      POSTGRES_USER: email_user
-      POSTGRES_PASSWORD: secure_email_password_123
+      POSTGRES_DB: ${DB_NAME:-email_generator}
+      POSTGRES_USER: ${DB_USER:-email_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secure_email_password_123}
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -37,34 +37,34 @@ services:
         condition: service_healthy
     environment:
       # Database Configuration
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: email_generator
-      DB_USER: email_user
-      DB_PASSWORD: secure_email_password_123
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-email_generator}
+      DB_USER: ${DB_USER:-email_user}
+      DB_PASSWORD: ${DB_PASSWORD:-secure_email_password_123}
       
       # OpenAI Configuration (set via .env file or environment)
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: gpt-4o-mini
-      OPENAI_MAX_TOKENS: 1000
-      OPENAI_TEMPERATURE: 0.7
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_MAX_TOKENS: ${OPENAI_MAX_TOKENS:-1000}
+      OPENAI_TEMPERATURE: ${OPENAI_TEMPERATURE:-0.7}
       
       # Email Processing Configuration
-      BATCH_SIZE: 100
-      MAX_CSV_ROWS: 50000
-      INTELLIGENCE_BATCH_SIZE: 5
-      AI_FALLBACK_TO_TEMPLATE: "true"
+      BATCH_SIZE: ${BATCH_SIZE:-100}
+      MAX_CSV_ROWS: ${MAX_CSV_ROWS:-50000}
+      INTELLIGENCE_BATCH_SIZE: ${INTELLIGENCE_BATCH_SIZE:-5}
+      AI_FALLBACK_TO_TEMPLATE: ${AI_FALLBACK_TO_TEMPLATE:-true}
       
       # Server Configuration
       HOST: 0.0.0.0
       PORT: 8000
       
       # Database Connection Pool Settings
-      DB_POOL_SIZE: 10
-      DB_MAX_OVERFLOW: 20
-      DB_POOL_TIMEOUT: 30
-      DB_POOL_RECYCLE: 3600
-      DB_ECHO: "false"
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-3600}
+      DB_ECHO: ${DB_ECHO:-false}
     ports:
       - "8000:8000"
     volumes:

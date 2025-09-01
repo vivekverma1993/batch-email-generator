@@ -38,13 +38,14 @@ A production-ready FastAPI application that generates personalized outreach emai
 
 ### 1. Zero-Configuration Setup (30 seconds)
 
-```bash
+   ```bash
 # Clone and start
-git clone https://github.com/yourusername/batch-email-generator.git
-cd batch-email-generator
+   git clone https://github.com/yourusername/batch-email-generator.git
+   cd batch-email-generator
 
-# Set your OpenAI API key
-echo "OPENAI_API_KEY=sk-your-api-key-here" > .env
+# Create environment file and set your API key
+cp env.example .env
+# Edit .env file and set OPENAI_API_KEY=sk-your-api-key-here
 
 # Start everything (database + API + frontend)
 make up-alpine
@@ -151,21 +152,28 @@ FROM generated_emails GROUP BY template_type;
 
 ## Configuration
 
-### Environment Variables (.env file)
+### Environment Variables
+
+**Simple Setup:**
+1. Copy `env.example` to `.env`: `cp env.example .env`
+2. Set your OpenAI API key in `.env`
+3. All other settings use Docker defaults
+
+**Key Variables:**
 ```bash
 # Required
 OPENAI_API_KEY=sk-your-api-key-here
 
-# Processing (optional)
+# Optional Processing Settings
 BATCH_SIZE=100                    # Template processing batch size
-INTELLIGENCE_BATCH_SIZE=5         # AI processing batch size
+INTELLIGENCE_BATCH_SIZE=5         # AI processing batch size  
 MAX_CSV_ROWS=50000               # Max rows per upload
 
-# Database (auto-configured in Docker)
+# Database Settings (Docker defaults work out-of-box)
 DB_HOST=postgres
-DB_NAME=email_generator
+DB_NAME=email_generator  
 DB_USER=email_user
-# ... other DB settings handled automatically
+DB_PASSWORD=secure_email_password_123
 ```
 
 ### Available Templates
@@ -282,9 +290,10 @@ make logs-all       # All services
 
 ### Troubleshooting
 1. **Services not starting**: `make down && make up-alpine`
-2. **Database issues**: `docker-compose -f docker/docker-compose.yml down -v && make up-alpine`
-3. **Port conflicts**: Check ports 3000, 8000, 5432 availability
-4. **OpenAI errors**: Verify API key in .env file
+2. **Database connection issues**: Check if .env has correct DB settings (should match env.example defaults)
+3. **OpenAI errors**: Verify `OPENAI_API_KEY` is set in .env file
+4. **Port conflicts**: Check ports 3000, 8000, 5432 availability
+5. **Environment issues**: `cp env.example .env` to reset to defaults
 
 ## What Your Team Gets
 
