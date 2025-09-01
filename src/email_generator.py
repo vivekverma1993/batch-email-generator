@@ -77,11 +77,18 @@ def render_email_template(template_str: str, name: str, company: str, linkedin_u
         Rendered email content
     """
     try:
+        from .utils import get_random_agent_info
+        
+        # Get random agent information
+        agent_info = get_random_agent_info()
+        
         template = Template(template_str)
         return template.render(
             name=name,
             company=company,
-            linkedin_url=linkedin_url
+            linkedin_url=linkedin_url,
+            agent_name=agent_info['agent_name'],
+            company_name=agent_info['company_name']
         ).strip()
     except Exception as e:
         return f"Error rendering template: {str(e)}"
@@ -248,11 +255,17 @@ async def generate_static_template_email(row: pd.Series, fallback_template_type:
         template_content = get_template_content(template_type)
         template = Template(template_content)
         
+        # Get random agent information
+        from .utils import get_random_agent_info
+        agent_info = get_random_agent_info()
+        
         # Convert row to dict for template rendering
         context = {
             'name': str(row.get('name', '')),
             'company': str(row.get('company', '')),
-            'linkedin_url': str(row.get('linkedin_url', ''))
+            'linkedin_url': str(row.get('linkedin_url', '')),
+            'agent_name': agent_info['agent_name'],
+            'company_name': agent_info['company_name']
         }
         
         # Render template with context

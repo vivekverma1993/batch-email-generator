@@ -23,25 +23,25 @@ fi
 
 echo "Docker and Docker Compose are installed"
 
-# Check if .env file exists
-if [ ! -f ".env" ]; then
-    echo "Creating .env file from template..."
-    cp env.example .env
+# Check if docker/.env file exists
+if [ ! -f "docker/.env" ]; then
+    echo "Creating docker/.env file from template..."
+    cp env.example docker/.env
     echo
-    echo "  IMPORTANT: Please edit .env file and set your OPENAI_API_KEY"
+    echo "  IMPORTANT: Please edit docker/.env file and set your OPENAI_API_KEY"
     echo "   You can get one at: https://platform.openai.com/"
     echo
     read -p "Press Enter to continue after setting your API key..."
 fi
 
 # Check if OPENAI_API_KEY is set
-if ! grep -q "OPENAI_API_KEY=sk-" .env; then
-    echo "  Warning: OPENAI_API_KEY not set in .env file"
+if ! grep -q "OPENAI_API_KEY=sk-" docker/.env; then
+    echo "  Warning: OPENAI_API_KEY not set in docker/.env file"
     echo "   AI features will be disabled"
     echo
     read -p "Continue anyway? (y/N): " continue_without_key
     if [[ ! $continue_without_key =~ ^[Yy]$ ]]; then
-        echo "Please set your OPENAI_API_KEY in .env and run this script again"
+        echo "Please set your OPENAI_API_KEY in docker/.env and run this script again"
         exit 1
     fi
 fi

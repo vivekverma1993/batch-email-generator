@@ -41,7 +41,7 @@ Would you be open to a 15-minute call this week? I'd love to share some specific
 
 
 Best regards,
-Vivek Verma
+{{agent_name}}
 
 P.S. If this isn't a priority right now, I completely understand. Feel free to keep my contact for future reference."""
     },
@@ -62,7 +62,7 @@ Would you be interested in a brief conversation about potential opportunities? I
 
 
 Best regards,
-Vivek Verma
+{{agent_name}}
 Talent Acquisition Team
 
 P.S. Even if you're not actively looking, I'd be happy to keep you in mind for future opportunities."""
@@ -84,7 +84,7 @@ Would you be open to connecting? I'd love to learn more about your work and shar
 
 
 Best regards,
-Vivek Verma
+{{agent_name}}
 
 P.S. No agenda here - just genuinely interested in expanding my professional network with quality connections."""
     },
@@ -97,7 +97,7 @@ P.S. No agenda here - just genuinely interested in expanding my professional net
 
 Hi {{name}},
 
-I've been researching companies in our space and {{company}} consistently comes up as an industry leader. Your approach to [specific area] particularly caught my attention.
+I've been researching companies in our space and {{company}} consistently comes up as an industry leader. Your innovative approach to business development particularly caught my attention.
 
 I believe there might be some interesting synergies between our organizations. We've been exploring strategic partnerships that could benefit both parties, and I think {{company}} could be an ideal fit.
 
@@ -105,7 +105,7 @@ I'd love to explore potential collaboration opportunities. Would you be interest
 
 
 Best regards,
-Vivek Verma
+{{agent_name}}
 Business Development
 
 P.S. I'm happy to share some specific ideas I have in mind during our conversation."""
@@ -127,7 +127,7 @@ Would you have time for a brief follow-up call this week? I can provide more con
 
 
 Best regards,
-Vivek Verma
+{{agent_name}}
 
 P.S. Thank you for your time during our last conversation - I found your insights very valuable."""
     },
@@ -140,7 +140,7 @@ P.S. Thank you for your time during our last conversation - I found your insight
 
 Hi {{name}},
 
-I hope this email finds you well. My name is Vivek Verma, and I wanted to introduce myself and my work.
+I hope this email finds you well. My name is {{agent_name}}, and I wanted to introduce myself and my work.
 
 I help companies like {{company}} optimize their operations and achieve sustainable growth. Based on what I've seen about {{company}}'s trajectory, I believe there might be some interesting opportunities to collaborate.
 
@@ -150,7 +150,7 @@ Would you be open to a brief introductory conversation? I promise to keep it con
 
 
 Best regards,
-Vivek Verma
+{{agent_name}}
 
 P.S. I'm genuinely interested in learning about your business, not just pitching services."""
     },
@@ -159,20 +159,20 @@ P.S. I'm genuinely interested in learning about your business, not just pitching
         "name": "Cold Email Outreach",
         "description": "Generic cold email template for initial contact",
         "use_case": "First-time contact with prospects who don't know you",
-        "content": """Subject: Quick question about {{company}}'s [specific area]
+        "content": """Subject: Quick question about {{company}}'s growth strategy
 
 Hi {{name}},
 
-I hope you're having a great week. I've been researching companies in your industry and {{company}} stands out for [specific reason].
+I hope you're having a great week. I've been researching companies in your industry and {{company}} stands out for your innovative market positioning.
 
-I'm reaching out because I help organizations like {{company}} with [specific value proposition]. I've noticed that many companies in your space are dealing with [common challenge], and I'm curious if this is something {{company}} is experiencing as well.
+I'm reaching out because I help organizations like {{company}} with operational optimization and growth acceleration. I've noticed that many companies in your space are dealing with scaling challenges, and I'm curious if this is something {{company}} is experiencing as well.
 
 If so, I'd love to share a quick insight that has helped similar companies. Would you be open to a brief 10-minute conversation?
 
 No worries if the timing isn't right - I understand how busy things can get.
 
 Best regards,
-Vivek Verma
+{{agent_name}}
 """
     }
 }

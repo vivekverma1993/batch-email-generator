@@ -86,7 +86,7 @@ up-network-fix:
 
 up-alpine:
 	@echo "Starting with Alpine Linux + Frontend (bypasses Debian issues)..."
-	docker-compose -f docker/docker-compose.alpine.yml up -d --build
+	docker-compose -f docker/docker-compose.alpine.yml --env-file .env up -d --build
 	@echo "[OK] Alpine build completed! API: http://localhost:8000 | Frontend: http://localhost:3000"
 
 up-ubuntu:
@@ -101,7 +101,7 @@ up-frontend:
 
 down:
 	@echo "Stopping Email Generator services..."
-	docker-compose -f docker/docker-compose.yml down
+	docker-compose -f docker/docker-compose.yml --env-file .env down
 
 restart: down up
 	@echo "Services restarted!"
@@ -251,12 +251,12 @@ full:
 # Setup helper
 setup:
 	@echo "First-time setup..."
-	@if [ ! -f .env ]; then \
-		echo "Creating .env file from template..."; \
-		cp env.example .env; \
-		echo "Please edit .env and add your OPENAI_API_KEY"; \
-		echo "   Then run: make up"; \
+	@if [ ! -f docker/.env ]; then \
+		echo "Creating docker/.env file from template..."; \
+		cp env.example docker/.env; \
+		echo "Please edit docker/.env and add your OPENAI_API_KEY"; \
+		echo "   Then run: make up-alpine"; \
 	else \
-		echo "[OK] .env file already exists"; \
-		make up; \
+		echo "[OK] docker/.env file already exists"; \
+		make up-alpine; \
 	fi

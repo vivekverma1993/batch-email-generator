@@ -40,12 +40,12 @@ A production-ready FastAPI application that generates personalized outreach emai
 
    ```bash
 # Clone and start
-   git clone https://github.com/yourusername/batch-email-generator.git
-   cd batch-email-generator
+git clone https://github.com/yourusername/batch-email-generator.git
+cd batch-email-generator
 
 # Create environment file and set your API key
-cp env.example .env
-# Edit .env file and set OPENAI_API_KEY=sk-your-api-key-here
+cp env.example docker/.env
+# Edit docker/.env file and set OPENAI_API_KEY=sk-your-api-key-here
 
 # Start everything (database + API + frontend)
 make up-alpine
@@ -59,7 +59,7 @@ make up-alpine
 ### 2. Alternative: Automated Script
 
 ```bash
-# Guided setup with validation
+# Guided setup with validation (handles environment setup)
 ./quick-start.sh
 
 # Comprehensive testing
@@ -155,8 +155,8 @@ FROM generated_emails GROUP BY template_type;
 ### Environment Variables
 
 **Simple Setup:**
-1. Copy `env.example` to `.env`: `cp env.example .env`
-2. Set your OpenAI API key in `.env`
+1. Copy `env.example` to `docker/.env`: `cp env.example docker/.env`
+2. Set your OpenAI API key in `docker/.env`
 3. All other settings use Docker defaults
 
 **Key Variables:**
@@ -290,10 +290,10 @@ make logs-all       # All services
 
 ### Troubleshooting
 1. **Services not starting**: `make down && make up-alpine`
-2. **Database connection issues**: Check if .env has correct DB settings (should match env.example defaults)
-3. **OpenAI errors**: Verify `OPENAI_API_KEY` is set in .env file
+2. **Database connection issues**: Check if docker/.env has correct DB settings (should match env.example defaults)
+3. **OpenAI errors**: Verify `OPENAI_API_KEY` is set in docker/.env file
 4. **Port conflicts**: Check ports 3000, 8000, 5432 availability
-5. **Environment issues**: `cp env.example .env` to reset to defaults
+5. **Environment issues**: `cp env.example docker/.env` to reset to defaults
 
 ## What Your Team Gets
 
