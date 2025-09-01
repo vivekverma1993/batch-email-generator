@@ -40,7 +40,7 @@ A production-ready FastAPI application that generates personalized outreach emai
 
    ```bash
 # Clone and start
-   git clone https://github.com/yourusername/batch-email-generator.git
+   git clone https://github.com/vivekverma1993/batch-email-generator.git
    cd batch-email-generator
 
 # Create environment file and set your API key
