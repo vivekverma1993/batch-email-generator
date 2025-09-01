@@ -49,11 +49,12 @@ fi
 echo "🏗️  Starting services..."
 echo
 
-# Start services
+# Start services with frontend (using Alpine setup)
+echo "Starting complete stack (database + API + frontend)..."
 if command -v docker-compose &> /dev/null; then
-    docker-compose -f docker/docker-compose.yml up -d
+    docker-compose -f docker/docker-compose.alpine.yml up -d --build
 else
-    docker compose -f docker/docker-compose.yml up -d
+    docker compose -f docker/docker-compose.alpine.yml up -d --build
 fi
 
 echo
@@ -82,20 +83,22 @@ echo
 echo "Email Generator is running!"
 echo
 echo "Quick Links:"
+echo "   Web Interface:     http://localhost:3000  (Main UI - START HERE)"
 echo "   API Documentation: http://localhost:8000/docs"
 echo "   Health Check:      http://localhost:8000/health"
 echo "   Available Templates: http://localhost:8000/templates"
 echo
 echo "Useful Commands:"
-echo "   View logs:        docker-compose -f docker/docker-compose.yml logs -f app"
-echo "   Stop services:    docker-compose -f docker/docker-compose.yml down"
-echo "   Restart:          docker-compose -f docker/docker-compose.yml restart"
-echo "   Generate test data: docker-compose -f docker/docker-compose.yml exec app python scripts/generate_test_data.py"
+echo "   View logs:        docker-compose -f docker/docker-compose.alpine.yml logs -f app"
+echo "   Stop services:    docker-compose -f docker/docker-compose.alpine.yml down"
+echo "   Restart:          docker-compose -f docker/docker-compose.alpine.yml restart"
+echo "   Generate test data: docker-compose -f docker/docker-compose.alpine.yml exec app python scripts/generate_test_data.py"
 echo
-echo "   Or use the Makefile:"
-echo "   make logs         # View logs"
-echo "   make status       # Check status"
-echo "   make test         # Test endpoints"
+echo "   Or use the Makefile (recommended):"
+echo "   make status       # Check all services status"
+echo "   make logs         # View application logs"
+echo "   make test         # Test all endpoints"
+echo "   make down         # Stop everything"
 echo
 
 # Test basic functionality
