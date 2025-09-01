@@ -5,66 +5,62 @@ FROM nginx:alpine
 COPY ui/ /usr/share/nginx/html/
 
 # Create nginx configuration for SPA routing and API proxy
-RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'
-server {
-    listen 80;
-    server_name localhost;
-    
-    # Serve static files
-    location / {
-        root /usr/share/nginx/html;
-        index index.html;
-        try_files $uri $uri/ /index.html;
-        
-        # Enable gzip compression
-        gzip on;
-        gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
-    }
-    
-    # Proxy API requests to the backend
-    location /api/ {
-        proxy_pass http://app:8000/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # Support for Server-Sent Events
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_set_header Connection '';
-        proxy_http_version 1.1;
-        chunked_transfer_encoding off;
-    }
-    
-    # Health check endpoint
-    location /frontend-health {
-        access_log off;
-        return 200 "healthy\n";
-        add_header Content-Type text/plain;
-    }
-}
-EOF
+RUN echo 'server {' > /etc/nginx/conf.d/default.conf && \
+    echo '    listen 80;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    server_name localhost;' >> /etc/nginx/conf.d/default.conf && \
+    echo '' >> /etc/nginx/conf.d/default.conf && \
+    echo '    # Serve static files' >> /etc/nginx/conf.d/default.conf && \
+    echo '    location / {' >> /etc/nginx/conf.d/default.conf && \
+    echo '        root /usr/share/nginx/html;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        index index.html;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        try_files $uri $uri/ /index.html;' >> /etc/nginx/conf.d/default.conf && \
+    echo '' >> /etc/nginx/conf.d/default.conf && \
+    echo '        # Enable gzip compression' >> /etc/nginx/conf.d/default.conf && \
+    echo '        gzip on;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    }' >> /etc/nginx/conf.d/default.conf && \
+    echo '' >> /etc/nginx/conf.d/default.conf && \
+    echo '    # Proxy API requests to the backend' >> /etc/nginx/conf.d/default.conf && \
+    echo '    location /api/ {' >> /etc/nginx/conf.d/default.conf && \
+    echo '        proxy_pass http://app:8000/;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        proxy_set_header Host $host;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        proxy_set_header X-Real-IP $remote_addr;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        proxy_set_header X-Forwarded-Proto $scheme;' >> /etc/nginx/conf.d/default.conf && \
+    echo '' >> /etc/nginx/conf.d/default.conf && \
+    echo '        # Support for Server-Sent Events' >> /etc/nginx/conf.d/default.conf && \
+    echo '        proxy_buffering off;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        proxy_cache off;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        proxy_set_header Connection "";' >> /etc/nginx/conf.d/default.conf && \
+    echo '        proxy_http_version 1.1;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        chunked_transfer_encoding off;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    }' >> /etc/nginx/conf.d/default.conf && \
+    echo '' >> /etc/nginx/conf.d/default.conf && \
+    echo '    # Health check endpoint' >> /etc/nginx/conf.d/default.conf && \
+    echo '    location /frontend-health {' >> /etc/nginx/conf.d/default.conf && \
+    echo '        access_log off;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        return 200 "healthy\\n";' >> /etc/nginx/conf.d/default.conf && \
+    echo '        add_header Content-Type text/plain;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    }' >> /etc/nginx/conf.d/default.conf && \
+    echo '}' >> /etc/nginx/conf.d/default.conf
 
 # Create startup script to replace API URLs based on environment
-RUN cat > /docker-entrypoint.sh << 'EOF'
-#!/bin/sh
-
-# Get API base URL from environment or use default
-API_BASE_URL=${API_BASE_URL:-http://localhost:8000}
-
-# Replace API_BASE_URL in HTML files
-echo "Configuring frontend with API_BASE_URL: $API_BASE_URL"
-
-# Update index.html
-sed -i "s|const API_BASE_URL = 'http://localhost:8000';|const API_BASE_URL = '$API_BASE_URL';|g" /usr/share/nginx/html/index.html
-
-# Update history.html  
-sed -i "s|const API_BASE_URL = 'http://localhost:8000';|const API_BASE_URL = '$API_BASE_URL';|g" /usr/share/nginx/html/history.html
-
-# Start nginx
-exec nginx -g 'daemon off;'
-EOF
+RUN echo '#!/bin/sh' > /docker-entrypoint.sh && \
+    echo '' >> /docker-entrypoint.sh && \
+    echo '# Get API base URL from environment or use default' >> /docker-entrypoint.sh && \
+    echo 'API_BASE_URL=${API_BASE_URL:-http://localhost:8000}' >> /docker-entrypoint.sh && \
+    echo '' >> /docker-entrypoint.sh && \
+    echo '# Replace API_BASE_URL in HTML files' >> /docker-entrypoint.sh && \
+    echo 'echo "Configuring frontend with API_BASE_URL: $API_BASE_URL"' >> /docker-entrypoint.sh && \
+    echo '' >> /docker-entrypoint.sh && \
+    echo '# Update index.html' >> /docker-entrypoint.sh && \
+    echo 'sed -i "s|const API_BASE_URL = '"'"'http://localhost:8000'"'"';|const API_BASE_URL = '"'"'$API_BASE_URL'"'"';|g" /usr/share/nginx/html/index.html' >> /docker-entrypoint.sh && \
+    echo '' >> /docker-entrypoint.sh && \
+    echo '# Update history.html' >> /docker-entrypoint.sh && \
+    echo 'sed -i "s|const API_BASE_URL = '"'"'http://localhost:8000'"'"';|const API_BASE_URL = '"'"'$API_BASE_URL'"'"';|g" /usr/share/nginx/html/history.html' >> /docker-entrypoint.sh && \
+    echo '' >> /docker-entrypoint.sh && \
+    echo '# Start nginx' >> /docker-entrypoint.sh && \
+    echo 'exec nginx -g '"'"'daemon off;'"'"'' >> /docker-entrypoint.sh
 
 # Make startup script executable
 RUN chmod +x /docker-entrypoint.sh
