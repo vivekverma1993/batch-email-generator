@@ -17,7 +17,7 @@ The Batch Email Generator revolutionizes personalized email outreach by offering
 - **AI Mode** (`intelligence=true`): OpenAI-powered personalization with fake LinkedIn research (~3-8s per email)
 - **Hybrid Processing**: Mix both modes in a single CSV for optimal flexibility
 
-### 🧠 Intelligence Layer
+### Intelligence Layer
 - **Fake LinkedIn Research**: Industry-aware profile generation with realistic job titles, skills, and experience
 - **AI-Powered Personalization**: OpenAI integration for highly customized email content
 - **Background Processing**: AI emails processed asynchronously with UUID placeholders
@@ -38,21 +38,105 @@ The Batch Email Generator revolutionizes personalized email outreach by offering
 
 ## Tech Stack
 
+- **Frontend**: HTML5 + CSS3 + Vanilla JavaScript with Server-Sent Events (SSE)
+- **Web Server**: Nginx Alpine (reverse proxy + static file serving)
 - **Backend**: FastAPI (Python 3.8+)
+- **Database**: PostgreSQL 15 (full persistence)
 - **Data Processing**: Pandas
 - **Templating**: Jinja2
 - **AI Integration**: OpenAI GPT for intelligent email generation
 - **Server**: Uvicorn with async background processing
-- **Deployment**: Docker-ready, supports Render/Railway free tiers
+- **Containerization**: Docker + Docker Compose (Alpine Linux)
+- **Deployment**: Docker-ready, supports any Docker hosting platform
 
 ## Installation
+
+## Docker Setup (Recommended)
+
+Complete full-stack application with zero configuration required.
+
+### Prerequisites
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+- OpenAI API key ([Get one here](https://platform.openai.com/))
+
+### Quick Start
+```bash
+# 1. Clone the repository
+git clone https://github.com/yourusername/batch-email-generator.git
+cd batch-email-generator
+
+# 2. Set your OpenAI API key
+echo "OPENAI_API_KEY=sk-your-actual-api-key-here" > .env
+
+# 3. Start complete stack
+make up-alpine
+```
+
+### Access Points
+- **Web Interface**: http://localhost:3000
+- **API Documentation**: http://localhost:8000/docs
+- **API Health Check**: http://localhost:8000/health
+- **Frontend Health**: http://localhost:3000/frontend-health
+
+### Frontend Options
+
+#### Option 1: Docker Frontend (Recommended)
+- **Web Interface**: http://localhost:3000 (Primary option)
+- **Features**: Complete containerized stack with nginx
+- **Best for**: Production, Docker users
+
+#### Option 2: Python Frontend Server (Development)
+```bash
+make serve-ui
+# Then visit: http://localhost:3001
+```
+- **Features**: Simple Python HTTP server for development
+- **Best for**: Local frontend development
+
+### Docker Commands
+
+#### Using Makefile (Recommended)
+```bash
+make up-alpine   # Start complete stack (Alpine Linux)
+make down        # Stop all services
+make status      # Check service status
+make logs        # View app logs
+make logs-frontend # View frontend logs
+make logs-all    # View all logs
+make test        # Run API tests
+make clean       # Clean Docker resources
+```
+
+#### Direct Docker Commands
+```bash
+# Start services
+docker-compose -f docker-compose.alpine.yml up -d
+
+# View logs
+docker-compose logs -f app
+docker-compose logs -f frontend
+
+# Stop services
+docker-compose down
+
+# Reset everything (fresh start)
+docker-compose down -v && docker-compose up -d
+
+# Clean up resources
+docker system prune -a -f
+```
+
+---
+
+## Manual Installation (Advanced Users)
 
 ### Prerequisites
 - Python 3.8 or higher
 - pip package manager
+- PostgreSQL 12+
 - OpenAI API key (for AI-powered email generation)
 
-### Quick Start
+### Manual Setup Steps
 
 1. **Clone the repository**
    ```bash
@@ -60,31 +144,46 @@ The Batch Email Generator revolutionizes personalized email outreach by offering
    cd batch-email-generator
    ```
 
-2. **Install dependencies**
+2. **Set up PostgreSQL database**
    ```bash
+   # Install PostgreSQL (macOS)
+   brew install postgresql@15
+   brew services start postgresql@15
+   
+   # Create database
+   createdb email_generator
+   ```
+
+3. **Install Python dependencies**
+   ```bash
+   python3 -m venv email_generator_env
+   source email_generator_env/bin/activate
    pip install -r requirements.txt
    ```
 
-3. **Set up environment variables** (Optional for AI features)
+4. **Configure environment**
    ```bash
-   # Create .env file
-   echo "OPENAI_API_KEY=your_openai_api_key_here" > .env
-   echo "BATCH_SIZE=100" >> .env
-   echo "INTELLIGENCE_BATCH_SIZE=5" >> .env
-   echo "MAX_CSV_ROWS=50000" >> .env
-   echo "AI_FALLBACK_TO_TEMPLATE=true" >> .env
+   cp env.example .env
+   # Edit .env with your database credentials and OpenAI API key
    ```
 
-4. **Run the application**
+5. **Initialize database**
+   ```bash
+   python init_database.py --setup
+   ```
+
+6. **Run the application**
    ```bash
    uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
-5. **Access the API**
+7. **Access the API**
    - API: http://localhost:8000
    - Interactive docs: http://localhost:8000/docs
    - ReDoc: http://localhost:8000/redoc
    - Health check: http://localhost:8000/health
+
+**Note**: For detailed troubleshooting of manual setup, refer to the PostgreSQL and Python documentation.
 
 ### Environment Configuration
 
@@ -239,13 +338,13 @@ The system includes 7 professional email templates optimized for different use c
 
 ## Processing Modes
 
-### 🔥 Template Mode (`intelligence=false`)
+### Template Mode (`intelligence=false`)
 - **Speed**: ~0.01 seconds per email
 - **Cost**: Free (no API calls)
 - **Quality**: Professional, consistent templates with variable substitution
 - **Best for**: High-volume campaigns, consistent messaging, budget-conscious users
 
-### 🧠 AI Mode (`intelligence=true`)  
+### AI Mode (`intelligence=true`)  
 - **Speed**: ~3-8 seconds per email
 - **Cost**: OpenAI API usage (~$0.001-0.01 per email depending on model)
 - **Quality**: Highly personalized using fake LinkedIn research + AI generation

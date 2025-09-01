@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 
 # Configuration
-PORT = 3000
+PORT = 3001  # Changed to 3001 to avoid conflict with Docker frontend (port 3000)
 HOST = 'localhost'
 
 class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -77,9 +77,12 @@ def main():
             print()
             print("Instructions:")
             print("1. Make sure your FastAPI server is running on http://localhost:8000")
-            print("2. Open http://localhost:3000 in your browser")
+            print("   - Docker: make up-alpine (API will be available)")
+            print("   - Local: uvicorn src.main:app --reload")
+            print(f"2. Open http://localhost:{PORT} in your browser")
             print("3. Upload a CSV file and watch real-time email generation!")
             print()
+            print("Note: This Python server runs on port 3001 to avoid conflict with Docker frontend (port 3000)")
             print("Press Ctrl+C to stop the server")
             print("=" * 50)
             
@@ -100,7 +103,7 @@ def main():
         else:
             print(f"Error starting server: {e}")
     except KeyboardInterrupt:
-        print("\n🛑 Server stopped by user")
+        print("\n[!] Server stopped by user")
     except Exception as e:
         print(f"Unexpected error: {e}")
 

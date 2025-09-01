@@ -37,13 +37,13 @@ CREATE TABLE email_requests (
     
     -- Cost tracking
     total_llm_tokens_used INTEGER DEFAULT 0,
-    estimated_cost_usd DECIMAL(10,6) DEFAULT 0.00,
-    
-    -- Indexes for common queries
-    INDEX idx_request_id (request_id),
-    INDEX idx_created_at (created_at),
-    INDEX idx_status (status)
+    estimated_cost_usd DECIMAL(10,6) DEFAULT 0.00
 );
+
+-- Indexes for email_requests table
+CREATE INDEX IF NOT EXISTS idx_request_id ON email_requests (request_id);
+CREATE INDEX IF NOT EXISTS idx_created_at ON email_requests (created_at);
+CREATE INDEX IF NOT EXISTS idx_status ON email_requests (status);
 
 -- 2. GENERATED EMAILS
 CREATE TABLE generated_emails (
@@ -88,19 +88,19 @@ CREATE TABLE generated_emails (
     processing_started_at TIMESTAMP,
     processing_completed_at TIMESTAMP,
     
-    -- Indexes for performance
-    INDEX idx_request_id (request_id),
-    INDEX idx_processing_type (processing_type),
-    INDEX idx_status (status),
-    INDEX idx_created_at (created_at),
-    INDEX idx_company (company),
-    INDEX idx_placeholder_uuid (placeholder_uuid),
-    
     -- Full-text search on email content
-    CONSTRAINT generated_emails_search_vector tsvector GENERATED ALWAYS AS (
+    generated_emails_search_vector tsvector GENERATED ALWAYS AS (
         to_tsvector('english', COALESCE(generated_email, ''))
     ) STORED
 );
+
+-- Indexes for generated_emails table
+CREATE INDEX IF NOT EXISTS idx_generated_emails_request_id ON generated_emails (request_id);
+CREATE INDEX IF NOT EXISTS idx_generated_emails_processing_type ON generated_emails (processing_type);
+CREATE INDEX IF NOT EXISTS idx_generated_emails_status ON generated_emails (status);
+CREATE INDEX IF NOT EXISTS idx_generated_emails_created_at ON generated_emails (created_at);
+CREATE INDEX IF NOT EXISTS idx_generated_emails_company ON generated_emails (company);
+CREATE INDEX IF NOT EXISTS idx_generated_emails_placeholder_uuid ON generated_emails (placeholder_uuid);
 
 -- Full-text search index
 CREATE INDEX idx_email_content_search ON generated_emails USING gin(generated_emails_search_vector);
@@ -135,11 +135,12 @@ CREATE TABLE processing_batches (
     
     -- Error tracking
     error_message TEXT,
-    retry_count INTEGER DEFAULT 0,
-    
-    INDEX idx_request_batch (request_id, batch_type),
-    INDEX idx_status (status)
+    retry_count INTEGER DEFAULT 0
 );
+
+-- Indexes for processing_batches table
+CREATE INDEX IF NOT EXISTS idx_processing_batches_request_batch ON processing_batches (request_id, batch_type);
+CREATE INDEX IF NOT EXISTS idx_processing_batches_status ON processing_batches (status);
 
 -- 4. ERROR LOGS
 CREATE TABLE processing_errors (
@@ -163,13 +164,14 @@ CREATE TABLE processing_errors (
     -- Resolution
     resolved BOOLEAN DEFAULT FALSE,
     resolved_at TIMESTAMP,
-    resolution_notes TEXT,
-    
-    INDEX idx_request_id (request_id),
-    INDEX idx_error_type (error_type),
-    INDEX idx_occurred_at (occurred_at),
-    INDEX idx_resolved (resolved)
+    resolution_notes TEXT
 );
+
+-- Indexes for processing_errors table
+CREATE INDEX IF NOT EXISTS idx_processing_errors_request_id ON processing_errors (request_id);
+CREATE INDEX IF NOT EXISTS idx_processing_errors_error_type ON processing_errors (error_type);
+CREATE INDEX IF NOT EXISTS idx_processing_errors_occurred_at ON processing_errors (occurred_at);
+CREATE INDEX IF NOT EXISTS idx_processing_errors_resolved ON processing_errors (resolved);
 
 -- 5. SYSTEM METRICS (Optional)
 CREATE TABLE system_metrics (
@@ -183,11 +185,12 @@ CREATE TABLE system_metrics (
     time_period VARCHAR(20), -- 'hourly', 'daily', 'request'
     
     -- Context
-    request_id VARCHAR(50),
-    
-    INDEX idx_metric_name_time (metric_name, recorded_at),
-    INDEX idx_request_id (request_id)
+    request_id VARCHAR(50)
 );
+
+-- Indexes for system_metrics table
+CREATE INDEX IF NOT EXISTS idx_system_metrics_name_time ON system_metrics (metric_name, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_system_metrics_request_id ON system_metrics (request_id);
 
 -- 6. USEFUL VIEWS
 
